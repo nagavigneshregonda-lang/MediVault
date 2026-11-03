@@ -1,0 +1,144 @@
+/* ==============================================================================
+   MediVault: Official Hospital Prescription Print Stylesheet
+   ============================================================================== */
+
+@media print {
+  /* Hide all non-printable application elements */
+  body * {
+    visibility: hidden;
+  }
+
+  .app-sidebar,
+  .app-topbar,
+  .btn,
+  .modal-overlay:not(#print-prescription-modal),
+  #toast-container,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Make only the prescription container visible and fill the printed page */
+  #printable-prescription,
+  #printable-prescription * {
+    visibility: visible;
+  }
+
+  #printable-prescription {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 30px;
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    box-shadow: none !important;
+    border: 2px solid #0f766e !important;
+    border-radius: 8px;
+  }
+
+  /* Prescription Header */
+  .rx-header {
+    border-bottom: 2px solid #0f766e;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .rx-hospital-name {
+    font-size: 22px;
+    font-weight: 800;
+    color: #0f766e;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .rx-hospital-sub {
+    font-size: 11px;
+    color: #4b5563;
+    margin-top: 3px;
+  }
+
+  /* Patient & Doctor Meta Box */
+  .rx-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 25px;
+    font-size: 13px;
+  }
+
+  .rx-meta-col p {
+    margin: 4px 0;
+  }
+
+  .rx-symbol {
+    font-size: 38px;
+    font-weight: 900;
+    font-family: 'Times New Roman', serif;
+    color: #0f766e;
+    margin-bottom: 10px;
+  }
+
+  /* Medication Section */
+  .rx-medication-box {
+    margin-bottom: 30px;
+    padding: 15px 20px;
+    border-left: 4px solid #0f766e;
+    background: #ffffff;
+  }
+
+  .rx-med-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .rx-med-sig {
+    font-size: 15px;
+    margin-top: 6px;
+    color: #1f2937;
+    line-height: 1.6;
+  }
+
+  .rx-instructions {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #4b5563;
+    font-style: italic;
+  }
+
+  /* Security Footer and Signature */
+  .rx-footer {
+    margin-top: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-top: 20px;
+    border-top: 1px dashed #94a3b8;
+  }
+
+  .rx-signature-line {
+    width: 250px;
+    border-top: 1.5px solid #111827;
+    text-align: center;
+    padding-top: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .rx-watermark {
+    font-size: 9px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+}
+

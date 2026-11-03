@@ -1,0 +1,30 @@
+{
+  "name": "medivault",
+  "version": "1.0.0",
+  "description": "MediVault - Healthcare Record Management System",
+  "main": "server/app.js",
+  "scripts": {
+    "start": "node server/app.js",
+    "seed": "node server/db/seed.js",
+    "test": "jest --runInBand --detectOpenHandles --forceExit"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.12.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "keywords": ["healthcare", "ehr", "medical-records", "patient-management", "express", "mysql", "mysql2"],
+  "author": "MediVault Team",
+  "license": "ISC"
+}
