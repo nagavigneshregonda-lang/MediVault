@@ -44,15 +44,17 @@ async function login(req, res) {
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
 
-    // Set HTTP-only cookie
+    const isSecure = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production');
+
+    // Set HTTP-only cookie (works behind reverse proxies, SSL/HTTPS and local dev)
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isSecure,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000
     });
 
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
     logAudit({
       userId: user.id,
       userEmail: user.email,
@@ -103,9 +105,14 @@ async function getMe(req, res) {
 }
 
 function logout(req, res) {
-  res.clearCookie('token');
+  const isSecure = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production');
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: 'lax'
+  });
   if (req.user) {
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
     logAudit({
       userId: req.user.id,
       userEmail: req.user.email,

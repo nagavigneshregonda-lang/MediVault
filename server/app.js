@@ -19,6 +19,10 @@ const statsRoutes = require('./routes/stats');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
+
+// Enable Reverse Proxy Trust for Render, Cloudflare, NGINX, and HTTPS termination
+app.set('trust proxy', 1);
 
 // Security Headers
 app.use(helmet({
@@ -29,7 +33,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com", "data:"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'"]
+      connectSrc: ["'self'", "https:"]
     }
   },
   crossOriginEmbedderPolicy: false
@@ -98,10 +102,10 @@ app.use((err, req, res, next) => {
 // Start Server if invoked directly
 if (require.main === module) {
   initDatabase().then(() => {
-    app.listen(PORT, () => {
+    app.listen(PORT, HOST, () => {
       console.log(`=======================================================`);
       console.log(` MediVault: Healthcare Record Management System`);
-      console.log(` Server running at: http://localhost:${PORT}`);
+      console.log(` Server running at: http://${HOST}:${PORT}`);
       console.log(` Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`=======================================================`);
     });

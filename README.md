@@ -114,6 +114,54 @@ npm test
 
 ---
 
+## 🌐 Production Deployment (Aiven MySQL + Render)
+
+MediVault is architected for zero-friction cloud deployment using a managed MySQL database (such as **Aiven for MySQL**) and a cloud application platform (such as **Render**).
+
+### 1. Step 1: Set Up Cloud MySQL (Aiven)
+1. Sign up at [Aiven.io](https://aiven.io/) and create a new **MySQL** service (MySQL 8.0+).
+2. Once the service status turns **Running**, open the service overview tab to copy:
+   - **Host** (e.g., `mysql-xxxx-medivault.aivencloud.com`)
+   - **Port** (e.g., `12345`)
+   - **User** (e.g., `avnadmin`)
+   - **Password** (e.g., `AVNS_...`)
+   - **Database Name** (default: `defaultdb`)
+3. Aiven requires SSL encrypted connections by default. MediVault natively supports this via `DB_SSL=true`.
+
+### 2. Step 2: Deploy Web Service on Render
+1. Sign up at [Render.com](https://render.com/) and click **New + > Web Service**.
+2. Connect your Git repository containing the MediVault project.
+3. Configure the build & start settings:
+   - **Name**: `medivault` (or your preferred name)
+   - **Region**: Choose a region close to your Aiven MySQL cluster (e.g., Frankfurt / Oregon / Ohio)
+   - **Runtime**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Instance Type**: Free or Starter
+4. Under the **Advanced** tab, add the following **Environment Variables**:
+
+| Variable Name | Example / Recommended Value | Notes |
+| :--- | :--- | :--- |
+| `NODE_ENV` | `production` | Enables production security and optimization |
+| `JWT_SECRET` | `generate_a_64_char_random_hex_string` | Secret key for signing authentication tokens |
+| `DB_HOST` | `mysql-xxxx-medivault.aivencloud.com` | Hostname from your Aiven MySQL service |
+| `DB_PORT` | `12345` | Dedicated port from your Aiven MySQL service |
+| `DB_USER` | `avnadmin` | Default admin user or application user |
+| `DB_PASSWORD` | `your_aiven_password_here` | Passed as a discrete option (handles `@` and special characters cleanly) |
+| `DB_NAME` | `defaultdb` | Pre-created database on Aiven |
+| `DB_SSL` | `true` | Enables `mysql2` SSL with `{ rejectUnauthorized: false }` |
+
+### 3. Step 3: Automated Startup & Verification
+1. Click **Deploy Web Service**.
+2. **Reverse Proxy & HTTPS**: Render terminates SSL at its proxy layer. MediVault automatically sets `trust proxy: 1`, ensuring `req.ip`, rate limiting, Helmet CSP, and `secure: true` cookies operate seamlessly behind HTTPS.
+3. **Automatic Schema & Idempotent Seeding**:
+   - On first startup, MediVault detects that target database `defaultdb` exists and skips `CREATE DATABASE`.
+   - It checks whether tables exist; if missing, it applies `database/schema.sql`.
+   - If tables are empty, it auto-seeds initial demo accounts, 58 patient records, and clinical logs.
+   - Subsequent restarts on Render will detect existing data and immediately skip seeding, guaranteeing **zero data duplication**.
+
+---
+
 ## 🔑 Demo Accounts & Credentials
 
 The database comes pre-seeded with 58 realistic patient profiles, 15 timeline events, 17 prescriptions, 27 diagnostic tests (including overdue specimens and all 4 clinical flags), and clinical audit records. Use any of the following accounts (or click the 1-click login pills on the sign-in page):
