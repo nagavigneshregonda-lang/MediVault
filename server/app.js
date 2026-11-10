@@ -48,7 +48,7 @@ app.use(cors({
 // Rate Limiting Configuration
 const apiLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || 900000, 10), // 15 minutes default
-  max: parseInt(process.env.RATE_LIMIT_MAX || 1000, 10), // 1000 requests per 15 min per IP
+  max: process.env.NODE_ENV === 'test' ? 10000 : parseInt(process.env.RATE_LIMIT_MAX || 1000, 10), // relaxed during automated tests
   message: {
     success: false,
     message: 'Too many requests. Please try again later.'

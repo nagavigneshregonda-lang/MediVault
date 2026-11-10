@@ -1159,17 +1159,41 @@ describe('12. Universal Patient Account Linking & Self-Service Activation', () =
     expect(validRes.status).toBe(201);
     expect(validRes.body.success).toBe(true);
 
-    // E. Subsequent activation attempt on already-activated record fails (400)
-    const repeatRes = await request(app)
+    // E. Pre-provisioned patient (registered by Admin with temporary credentials) can activate with their chosen password
+    const preProvEmail = 'preprov.test@medivault.test';
+    const createPreProv = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'Pre',
+        last_name: 'Provisioned',
+        dob: '2005-08-15',
+        gender: 'Female',
+        blood_group: 'B+',
+        phone: '+1 (555) 333-4444',
+        email: preProvEmail,
+        create_login: true,
+        generate_temporary: true
+      });
+    expect(createPreProv.status).toBe(201);
+    const preProvPatCode = createPreProv.body.data.patient_id;
+
+    const preProvActRes = await request(app)
       .post('/api/auth/activate-patient')
       .send({
-        patient_id: patCode,
-        dob: actDob,
-        email: actEmail,
-        password: 'SecurePassword@123'
+        patient_id: preProvPatCode,
+        dob: '15 Aug 2005',
+        email: preProvEmail,
+        password: 'NewPatientPassword@123'
       });
-    expect(repeatRes.status).toBe(400);
-    expect(repeatRes.body.message).toMatch(/Account activation failed/i);
+    expect(preProvActRes.status).toBe(201);
+    expect(preProvActRes.body.success).toBe(true);
+
+    const preProvLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: preProvEmail, password: 'NewPatientPassword@123' });
+    expect(preProvLogin.status).toBe(200);
+    expect(preProvLogin.body.data.user.patientCode).toBe(preProvPatCode);
 
     // F. Activated patient logs in and accesses their medical record
     const loginRes = await request(app)

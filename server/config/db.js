@@ -218,26 +218,23 @@ async function runStartupMigrations(conn, dbName) {
     try {
       const [pat60] = await conn.query(`SELECT id, patient_id, user_id, email, dob FROM patients WHERE patient_id = 'MV-2026-0060'`);
       if (pat60.length > 0) {
-        // If it was linked to the old dummy test user or has dummy email, reset it so the patient can activate
-        if (pat60[0].email && pat60[0].email.includes('sarah.jenkins')) {
+        // Ensure email and dob match exactly for self-service verification
+        if (pat60[0].email !== '2403a51153@sru.edu.in' || pat60[0].dob !== '2007-05-04') {
           await conn.query(`
             UPDATE patients 
             SET email = '2403a51153@sru.edu.in',
                 dob = '2007-05-04',
-                user_id = NULL,
                 updated_at = NOW() 
             WHERE patient_id = 'MV-2026-0060'
           `);
-          await conn.query(`DELETE FROM users WHERE email LIKE 'sarah.jenkins%@example.com'`);
-          console.log(`[MIGRATION] Reset patient MV-2026-0060 to 2403a51153@sru.edu.in (DOB: 2007-05-04) for activation.`);
         }
       } else {
-        // If MV-2026-0060 does not exist, provision it as an unlinked patient profile
+        // If MV-2026-0060 does not exist in production database (e.g. fresh Aiven instance), provision it
         await conn.query(`
           INSERT INTO patients (patient_id, first_name, last_name, dob, gender, blood_group, phone, email, is_deleted)
-          VALUES ('MV-2026-0060', 'Student', 'Patient', '2007-05-04', 'Male', 'O+', '+91 9392860162', '2403a51153@sru.edu.in', 0)
+          VALUES ('MV-2026-0060', 'Sarah', 'Jenkins', '2007-05-04', 'Female', 'A+', '+1 555-954-5981', '2403a51153@sru.edu.in', 0)
         `);
-        console.log(`[MIGRATION] Provisioned unlinked patient MV-2026-0060 for 2403a51153@sru.edu.in.`);
+        console.log(`[MIGRATION] Synchronized patient MV-2026-0060 for 2403a51153@sru.edu.in.`);
       }
     } catch (pat60Err) {
       console.warn(`[MIGRATION] Notice checking MV-2026-0060: ${pat60Err.message}`);

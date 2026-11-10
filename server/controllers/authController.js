@@ -239,17 +239,13 @@ async function activatePatientAccount(req, res) {
       return errorResponse(res, genericError, 400);
     }
 
-    // Must not already have a linked user account
-    if (patient.user_id !== null && patient.user_id !== undefined) {
-      return errorResponse(res, genericError, 400);
-    }
-
-    // Registered email check (case-insensitive, trimmed)
+    // Strict 3-factor clinical identity verification:
+    // 1. Registered email check (case-insensitive, trimmed)
     if (!patient.email || patient.email.trim().toLowerCase() !== cleanEmail) {
       return errorResponse(res, genericError, 400);
     }
 
-    // Date of birth check (robust normalization to YYYY-MM-DD, immune to timezone shifts)
+    // 2. Date of birth check (robust normalization to YYYY-MM-DD, immune to timezone shifts)
     const patDobStr = patient.db_dob_str || normalizeDateToYMD(patient.dob);
     const inputDobStr = normalizeDateToYMD(dob);
 
@@ -257,47 +253,97 @@ async function activatePatientAccount(req, res) {
       return errorResponse(res, genericError, 400);
     }
 
-    // Check if user account with this email already exists
-    const [existingUsers] = await query(
-      'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
-      [cleanEmail]
-    );
-    if (existingUsers.length > 0) {
-      return errorResponse(res, genericError, 400);
-    }
-
-    // Hash password with bcrypt
+    // Hash the patient's chosen password
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Atomically create user and link patient in one transaction
+    let targetUserId = null;
+
     conn = await getConnection();
     await conn.beginTransaction();
 
-    const [userInsert] = await conn.query(`
-      INSERT INTO users (name, email, password_hash, role, phone)
-      VALUES (?, ?, ?, 'Patient', ?)
-    `, [
-      `${patient.first_name} ${patient.last_name}`.trim(),
-      cleanEmail,
-      passwordHash,
-      patient.phone || null
-    ]);
+    if (patient.user_id) {
+      // Case A: Patient already has a linked user account (e.g. pre-provisioned by Admin registration with temporary credentials)
+      const [linkedUsers] = await conn.query(
+        'SELECT id, email, role FROM users WHERE id = ? FOR UPDATE',
+        [patient.user_id]
+      );
+      const linkedUser = linkedUsers[0];
 
-    const newUserId = userInsert.insertId;
+      if (!linkedUser || linkedUser.role !== 'Patient') {
+        await conn.rollback();
+        return errorResponse(res, genericError, 400);
+      }
 
-    await conn.query(`
-      UPDATE patients 
-      SET user_id = ?, updated_at = NOW() 
-      WHERE id = ? AND user_id IS NULL
-    `, [newUserId, patient.id]);
+      await conn.query(
+        'UPDATE users SET password_hash = ?, email = ?, updated_at = NOW() WHERE id = ?',
+        [passwordHash, cleanEmail, linkedUser.id]
+      );
+      targetUserId = linkedUser.id;
+    } else {
+      // Case B: Patient is unlinked (user_id IS NULL)
+      // Check if a Patient user account with this email already exists
+      const [existingUsers] = await conn.query(
+        'SELECT id, email, role FROM users WHERE LOWER(TRIM(email)) = ? FOR UPDATE',
+        [cleanEmail]
+      );
+
+      if (existingUsers.length > 0) {
+        const existingUser = existingUsers[0];
+        if (existingUser.role !== 'Patient') {
+          // Cannot link a Patient clinical record to an Admin or Doctor account
+          await conn.rollback();
+          return errorResponse(res, genericError, 400);
+        }
+
+        // Verify no OTHER patient is already linked to this user account
+        const [otherPatients] = await conn.query(
+          'SELECT id FROM patients WHERE user_id = ? AND id != ? AND is_deleted = 0',
+          [existingUser.id, patient.id]
+        );
+        if (otherPatients.length > 0) {
+          await conn.rollback();
+          return errorResponse(res, genericError, 400);
+        }
+
+        // Link patient to this existing user and set their chosen password
+        await conn.query(
+          'UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?',
+          [passwordHash, existingUser.id]
+        );
+        await conn.query(
+          'UPDATE patients SET user_id = ?, updated_at = NOW() WHERE id = ?',
+          [existingUser.id, patient.id]
+        );
+        targetUserId = existingUser.id;
+      } else {
+        // Case C: No user account exists yet, create user and link to patient
+        const [userInsert] = await conn.query(`
+          INSERT INTO users (name, email, password_hash, role, phone)
+          VALUES (?, ?, ?, 'Patient', ?)
+        `, [
+          `${patient.first_name} ${patient.last_name}`.trim(),
+          cleanEmail,
+          passwordHash,
+          patient.phone || null
+        ]);
+
+        targetUserId = userInsert.insertId;
+
+        await conn.query(`
+          UPDATE patients 
+          SET user_id = ?, updated_at = NOW() 
+          WHERE id = ?
+        `, [targetUserId, patient.id]);
+      }
+    }
 
     await conn.commit();
 
     const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
 
     logAudit({
-      userId: newUserId,
+      userId: targetUserId,
       userEmail: cleanEmail,
       userRole: 'Patient',
       action: 'ACTIVATE',
