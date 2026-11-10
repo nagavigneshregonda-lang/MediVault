@@ -101,6 +101,7 @@ export async function renderUsersView() {
               <tr>
                 <th>Name & User Identity</th>
                 <th>Role</th>
+                <th>Linked Patient</th>
                 <th>Clinical Specialization / Department</th>
                 <th>Medical License #</th>
                 <th>Contact Phone</th>
@@ -108,7 +109,7 @@ export async function renderUsersView() {
               </tr>
             </thead>
             <tbody id="users-table-body">
-              ${renderSkeletonTable(5, 6)}
+              ${renderSkeletonTable(5, 7)}
             </tbody>
           </table>
         </div>
@@ -124,6 +125,19 @@ export function initUsersListeners() {
   if (addBtn) {
     addBtn.addEventListener('click', () => openAddUserModal());
   }
+
+  // Delegate Link Patient button clicks
+  const tbody = document.getElementById('users-table-body');
+  if (tbody) {
+    tbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.link-patient-action-btn');
+      if (btn) {
+        const userId = btn.getAttribute('data-user-id');
+        const userEmail = btn.getAttribute('data-user-email');
+        openLinkPatientModal(userId, userEmail);
+      }
+    });
+  }
 }
 
 async function loadUsersTable() {
@@ -134,7 +148,7 @@ async function loadUsersTable() {
     const users = await api.getUsers();
 
     if (!users || users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6">${renderEmptyState('fa-users-gear', 'No user accounts found', 'Provision a new doctor, technician, or administrator account.')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">${renderEmptyState('fa-users-gear', 'No user accounts found', 'Provision a new doctor, technician, or administrator account.')}</td></tr>`;
       return;
     }
 
@@ -166,6 +180,26 @@ async function loadUsersTable() {
         .join('')
         .toUpperCase();
 
+      let linkedPatientHtml = `<span style="color:var(--text-muted); font-size:0.82rem;">—</span>`;
+      if (u.role === 'Patient') {
+        if (u.linked_patient_code) {
+          linkedPatientHtml = `
+            <a href="#patient/${u.linked_patient_code}" class="badge badge-info" style="text-decoration:none; display:inline-flex; align-items:center; gap:0.35rem;" title="${u.linked_patient_name || ''}">
+              <i class="fa-solid fa-id-card"></i> ${u.linked_patient_code}
+            </a>
+          `;
+        } else {
+          linkedPatientHtml = `
+            <div style="display:flex; align-items:center; gap:0.4rem;">
+              <span class="badge badge-warning" style="font-size:0.75rem;"><i class="fa-solid fa-triangle-exclamation"></i> Unlinked</span>
+              <button type="button" class="btn btn-secondary btn-xs link-patient-action-btn" data-user-id="${u.id}" data-user-email="${u.email}" style="padding:2px 7px; font-size:0.75rem;">
+                <i class="fa-solid fa-link"></i> Link
+              </button>
+            </div>
+          `;
+        }
+      }
+
       return `
         <tr>
           <td>
@@ -181,6 +215,9 @@ async function loadUsersTable() {
             <span class="badge ${getUserRoleBadgeClass(u.role)}">${u.role}</span>
           </td>
           <td>
+            ${linkedPatientHtml}
+          </td>
+          <td>
             <div style="font-size:0.88rem;">${u.specialization || '<span style="color:var(--text-muted);">General</span>'}</div>
           </td>
           <td>
@@ -192,7 +229,7 @@ async function loadUsersTable() {
       `;
     }).join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6">${renderErrorState('Failed to load users: ' + err.message, 'loadUsersTable()')}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7">${renderErrorState('Failed to load users: ' + err.message, 'loadUsersTable()')}</td></tr>`;
   }
 }
 
@@ -203,6 +240,95 @@ function getUserRoleBadgeClass(role) {
     case 'Lab Technician': return 'badge-warning';
     case 'Patient': return 'badge-normal';
     default: return 'badge-info';
+  }
+}
+
+async function openLinkPatientModal(userId, userEmail) {
+  openModal({
+    title: `Link Patient Record to User (${userEmail})`,
+    bodyHtml: `
+      <div style="padding:1.5rem 0; text-align:center;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size:1.8rem; color:var(--primary);"></i>
+        <p style="margin-top:0.75rem; color:var(--text-muted);">Loading available unlinked patient records...</p>
+      </div>
+    `,
+    footerHtml: `<button class="btn btn-secondary modal-cancel-btn">Cancel</button>`,
+    maxWidth: '550px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+  modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+  try {
+    const resData = await api.getUnlinkedPatients();
+    const unlinkedPatients = resData?.patients || (Array.isArray(resData) ? resData : []);
+
+    if (unlinkedPatients.length === 0) {
+      modalEl.querySelector('.modal-body').innerHTML = `
+        <div style="text-align:center; padding:1.5rem 0;">
+          <div style="font-size:2.5rem; color:var(--text-muted); margin-bottom:0.75rem;">
+            <i class="fa-solid fa-folder-open"></i>
+          </div>
+          <h3 style="font-size:1.1rem; margin-bottom:0.5rem;">No Unlinked Patient Records</h3>
+          <p style="color:var(--text-muted); font-size:0.88rem;">All active patient records are already associated with user accounts.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const optionsHtml = unlinkedPatients.map(p => `
+      <option value="${p.id}">${p.patient_id} — ${p.first_name} ${p.last_name} (${p.email || 'No email'}, DOB: ${p.dob ? p.dob.substring(0, 10) : 'N/A'})</option>
+    `).join('');
+
+    modalEl.querySelector('.modal-body').innerHTML = `
+      <div style="margin-bottom:1.25rem;">
+        <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.5;">
+          Select an existing unlinked clinical record to associate with patient account <strong>${userEmail}</strong>.
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label>Select Unlinked Patient Record *</label>
+        <select id="link-target-patient-select" class="form-control" style="width:100%;" required>
+          <option value="">-- Choose Patient Record --</option>
+          ${optionsHtml}
+        </select>
+      </div>
+    `;
+
+    modalEl.querySelector('.modal-footer').innerHTML = `
+      <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
+      <button class="btn btn-primary modal-confirm-link-btn"><i class="fa-solid fa-link"></i> Associate Patient Record</button>
+    `;
+
+    modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    const confirmBtn = modalEl.querySelector('.modal-confirm-link-btn');
+    confirmBtn.addEventListener('click', async () => {
+      const selectedPatientId = modalEl.querySelector('#link-target-patient-select').value;
+      if (!selectedPatientId) {
+        showToast('Please select a patient record to link.', 'warning');
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Linking...';
+
+      try {
+        await api.linkPatientToUser(userId, selectedPatientId);
+        showToast('Patient record linked successfully!', 'success');
+        closeModal();
+        loadUsersTable();
+      } catch (err) {
+        showToast(err.message || 'Failed to link patient record.', 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-link"></i> Associate Patient Record';
+      }
+    });
+  } catch (err) {
+    modalEl.querySelector('.modal-body').innerHTML = `
+      <p style="color:var(--rose);">Failed to retrieve unlinked patient records: ${err.message}</p>
+    `;
   }
 }
 
@@ -225,10 +351,19 @@ function openAddUserModal() {
         </div>
       </div>
 
+      <!-- Conditional Patient Link Group (Required if role is Patient) -->
+      <div class="form-group" id="patient-link-group" style="display:none; background:rgba(14, 165, 164, 0.08); padding:0.85rem; border-radius:8px; border:1px solid var(--border-color);">
+        <label style="color:var(--primary); font-weight:600;"><i class="fa-solid fa-id-card"></i> Link to Patient Record *</label>
+        <select id="u-patient-id" class="form-control">
+          <option value="">-- Select Unlinked Patient Record --</option>
+        </select>
+        <small style="color:var(--text-muted); font-size:0.75rem;">Every Patient-role user must be associated with an existing clinical profile.</small>
+      </div>
+
       <div class="form-row">
         <div class="form-group">
           <label>Email Address *</label>
-          <input type="email" id="u-email" class="form-control" placeholder="doctor@medivault.com" required>
+          <input type="email" id="u-email" class="form-control" placeholder="user@medivault.com" required>
         </div>
         <div class="form-group">
           <label>Temporary Password * (Min 6 chars)</label>
@@ -236,7 +371,7 @@ function openAddUserModal() {
         </div>
       </div>
 
-      <div class="form-row">
+      <div class="form-row" id="clinical-fields-row">
         <div class="form-group">
           <label>Specialization / Department</label>
           <input type="text" id="u-spec" class="form-control" placeholder="e.g. Pediatric Cardiology, Hematology">
@@ -267,19 +402,59 @@ function openAddUserModal() {
   const modalEl = document.getElementById('app-active-modal');
   if (!modalEl) return;
 
+  const roleSelect = modalEl.querySelector('#u-role');
+  const patientGroup = modalEl.querySelector('#patient-link-group');
+  const patientSelect = modalEl.querySelector('#u-patient-id');
+  const clinicalRow = modalEl.querySelector('#clinical-fields-row');
+
+  // Handle role change dynamically
+  roleSelect.addEventListener('change', async () => {
+    const selectedRole = roleSelect.value;
+    if (selectedRole === 'Patient') {
+      patientGroup.style.display = 'block';
+      if (clinicalRow) clinicalRow.style.display = 'none';
+
+      // Load unlinked patients if not loaded
+      if (patientSelect.options.length <= 1) {
+        patientSelect.innerHTML = '<option value="">Loading unlinked patients...</option>';
+        try {
+          const resData = await api.getUnlinkedPatients();
+          const unlinked = resData?.patients || (Array.isArray(resData) ? resData : []);
+          if (unlinked.length === 0) {
+            patientSelect.innerHTML = '<option value="">No unlinked patients available</option>';
+          } else {
+            patientSelect.innerHTML = '<option value="">-- Select Unlinked Patient Record --</option>' +
+              unlinked.map(p => `<option value="${p.id}">${p.patient_id} — ${p.first_name} ${p.last_name} (${p.email || 'No email'})</option>`).join('');
+          }
+        } catch (_) {
+          patientSelect.innerHTML = '<option value="">Failed to load unlinked patients</option>';
+        }
+      }
+    } else {
+      patientGroup.style.display = 'none';
+      if (clinicalRow) clinicalRow.style.display = 'flex';
+    }
+  });
+
   const saveBtn = modalEl.querySelector('.modal-save-btn');
   modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
   saveBtn.addEventListener('click', async () => {
     const rawName = modalEl.querySelector('#u-name').value.trim();
-    const role = modalEl.querySelector('#u-role').value;
+    const role = roleSelect.value;
     const email = modalEl.querySelector('#u-email').value.trim();
     const password = modalEl.querySelector('#u-password').value;
     const spec = modalEl.querySelector('#u-spec').value.trim();
     const license = modalEl.querySelector('#u-license').value.trim();
     const phone = modalEl.querySelector('#u-phone').value.trim();
+    const patient_id = patientSelect.value;
 
     if (!rawName || !email || !password) {
       showToast('Name, email, and password are required.', 'warning');
+      return;
+    }
+
+    if (role === 'Patient' && !patient_id) {
+      showToast('Patient accounts must be linked to a patient record. Please select one.', 'warning');
       return;
     }
 
@@ -297,7 +472,8 @@ function openAddUserModal() {
         password,
         specialization: spec || null,
         license_number: license || null,
-        phone: phone || null
+        phone: phone || null,
+        patient_id: role === 'Patient' ? patient_id : undefined
       });
 
       showToast(`User account created for ${email}`, 'success');

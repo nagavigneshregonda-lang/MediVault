@@ -43,11 +43,19 @@
    - Admin audit query interface with multi-field filtering, aligned grid, and pagination.
    - Summary cards (Authentication events, consent changes, clinical modifications, chart access invocations).
 
-7. **System Health & Administrative Oversight**
+7. **Universal Patient Portal Account Linking & Self-Service Activation**
+   - **Enforced 1-to-1 Patient Linking**: Every Patient-role user account must be linked to exactly one clinical record via `patients.user_id` foreign key. User provisioning requires selecting an unlinked clinical record.
+   - **Intelligent Auto-Link on Login & Session Check**: When an unlinked Patient user logs in or hits `/api/auth/me`, the system automatically resolves and links to their matching unlinked patient record if exactly one email match exists, running atomically in a MySQL transaction with an audit log entry. If zero or multiple matches exist, it safely refrains from guessing and presents clear next steps.
+   - **Self-Service Patient Portal Activation (`#activate`)**: Patients can activate their portal access at `POST /api/auth/activate-patient` by validating their 3-point clinical identity: Hospital Patient ID (e.g. `MV-2026-0059`), Date of Birth, and registered email address. Features strict rate limiting (anti-enumeration / anti-brute-force), bcrypt password hashing, and generic error feedback.
+   - **Administrative Linking Hub (`#users`)**: User Management provides a dedicated "Linked Patient" column and a searchable modal to associate unlinked accounts with unlinked patient records.
+   - **Safe Startup Migration**: Auto-links unlinked Patient accounts on server boot idempotently and explicitly verifies designated user mappings.
+   - **Strict Record Isolation**: Patients can strictly view and manage only their own personal medical timeline (403 Forbidden for any other ID).
+
+8. **System Health & Administrative Oversight**
    - Live system health telemetry for Administrators: MySQL engine and version (`MySQL 8.0+ InnoDB`), connection pool metrics (active, idle, total, limit), Node.js runtime version, process memory (heap used/allocated), and server uptime.
    - User account provisioning with role enforcement and clean naming standards.
 
-8. **Design System & Responsive Architecture**
+9. **Design System & Responsive Architecture**
    - Seamless Light and Dark mode toggle with persisted preference.
    - Equal 42px form control heights, styled SVG dropdown chevrons, and aligned `.filter-bar-grid`.
    - Micro-interactions: trend badges, skeleton loading states, empty and error states with retry buttons.
@@ -64,7 +72,7 @@
 - **Frontend**: Modern HTML5, CSS3 Variables, Glassmorphism UI, Vanilla JavaScript (ES Modules), Hash Router SPA
 - **Visualizations**: Chart.js for clinical metric trends and 12-month registration graphs
 - **Security**: Helmet security headers, CORS, express-rate-limit, parameterized SQL queries (`?`)
-- **Testing**: Jest + Supertest (42/42 automated integration tests passing against isolated `medivault_test` database)
+- **Testing**: Jest + Supertest (53/53 automated integration tests passing against isolated `medivault_test` database)
 
 ---
 

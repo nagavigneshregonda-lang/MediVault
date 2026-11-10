@@ -882,5 +882,314 @@ describe('11. Patient Account Provisioning, Role-Scoped Dashboards & Strict Acce
   });
 });
 
+describe('12. Universal Patient Account Linking & Self-Service Activation', () => {
+  let unlinkedPatientCode;
+  let unlinkedPatientDob = '1990-05-15';
+  let unlinkedPatientEmail = 'unlinked.patient@medivault.test';
+  let unlinkedPatientId;
+
+  beforeAll(async () => {
+    // Create an unlinked patient record for testing
+    const createPatRes = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'TestUnlinked',
+        last_name: 'Patient',
+        dob: unlinkedPatientDob,
+        gender: 'Female',
+        blood_group: 'B+',
+        phone: '+1 (555) 998-1122',
+        email: unlinkedPatientEmail,
+        create_login: false
+      });
+    expect(createPatRes.status).toBe(201);
+    unlinkedPatientCode = createPatRes.body.data.patient_id;
+    unlinkedPatientId = createPatRes.body.data.id;
+  });
+
+  test('1. Creating Patient-role user in User Management requires an unlinked patient_id (400 if missing)', async () => {
+    const res = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Unlinked Patient User',
+        email: 'patient.nolink@medivault.test',
+        password: 'Password@123',
+        role: 'Patient'
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/linked to an existing patient record/i);
+  });
+
+  test('2. Creating Patient-role user with already-linked patient record fails with 409 Conflict', async () => {
+    // Eleanor Vance (id 1, MV-2026-0001) is already linked
+    const res = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Duplicate Link User',
+        email: 'duplicate.link@medivault.test',
+        password: 'Password@123',
+        role: 'Patient',
+        patient_id: 'MV-2026-0001'
+      });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/already linked/i);
+  });
+
+  test('3. Creating Patient-role user with valid unlinked patient_id succeeds and links them', async () => {
+    const res = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Linked Patient User',
+        email: 'linked.user@medivault.test',
+        password: 'Password@123',
+        role: 'Patient',
+        patient_id: unlinkedPatientCode
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.role).toBe('Patient');
+
+    // Verify patient is now linked
+    const patCheck = await request(app)
+      .get(`/api/patients/${unlinkedPatientCode}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(patCheck.body.data.has_login).toBe(true);
+    expect(patCheck.body.data.user_id).toBe(res.body.data.id);
+  });
+
+  test('4. Admin link endpoint: POST /api/users/:id/link-patient links unlinked Patient user to patient', async () => {
+    // Create another unlinked patient
+    const createPat = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'ManualLink',
+        last_name: 'Patient',
+        dob: '1985-08-20',
+        gender: 'Male',
+        blood_group: 'O+',
+        phone: '+1 (555) 777-3322',
+        email: 'manuallink.pat@medivault.test',
+        create_login: false
+      });
+    const targetPatId = createPat.body.data.id;
+    const targetPatCode = createPat.body.data.patient_id;
+
+    // Manually insert an unlinked Patient user to test linking endpoint
+    const [userInsert] = await query(
+      "INSERT INTO users (name, email, password_hash, role) VALUES ('Manual User', 'manual.user@medivault.test', 'hash123', 'Patient')"
+    );
+    const orphanUserId = userInsert.insertId;
+
+    // Non-Admin cannot link (403)
+    const forbiddenRes = await request(app)
+      .post(`/api/users/${orphanUserId}/link-patient`)
+      .set('Authorization', `Bearer ${doctorMarcusToken}`)
+      .send({ patient_id: targetPatCode });
+    expect(forbiddenRes.status).toBe(403);
+
+    // Admin links successfully
+    const linkRes = await request(app)
+      .post(`/api/users/${orphanUserId}/link-patient`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ patient_id: targetPatCode });
+    expect(linkRes.status).toBe(200);
+    expect(linkRes.body.success).toBe(true);
+
+    // Linking again fails with 409
+    const secondLinkRes = await request(app)
+      .post(`/api/users/${orphanUserId}/link-patient`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ patient_id: targetPatCode });
+    expect(secondLinkRes.status).toBe(409);
+  });
+
+  test('5. Auto-link on /api/auth/me and login: exact email match links unlinked patient inside transaction', async () => {
+    const autoLinkEmail = 'autolink.test@medivault.test';
+
+    // 1. Create unlinked patient with specific email
+    const createPat = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'AutoLinked',
+        last_name: 'Candidate',
+        dob: '1992-03-10',
+        gender: 'Female',
+        blood_group: 'A-',
+        phone: '+1 (555) 443-8899',
+        email: autoLinkEmail,
+        create_login: false
+      });
+    const patCode = createPat.body.data.patient_id;
+
+    // 2. Manually insert unlinked Patient-role user with same email (bcrypt hash of 'Password@123')
+    const bcrypt = require('bcryptjs');
+    const pwdHash = await bcrypt.hash('Password@123', 10);
+    const [uRes] = await query(
+      "INSERT INTO users (name, email, password_hash, role) VALUES ('Auto Candidate', ?, ?, 'Patient')",
+      [autoLinkEmail, pwdHash]
+    );
+    const orphanUserId = uRes.insertId;
+
+    // 3. User logs in -> auto-link executes
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: autoLinkEmail, password: 'Password@123' });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.data.user.patientCode).toBe(patCode);
+    const token = loginRes.body.data.token;
+
+    // 4. /api/auth/me also returns linked patient
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.patientCode).toBe(patCode);
+
+    // 5. Patient can open their own record
+    const ownRecRes = await request(app)
+      .get(`/api/patients/${patCode}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(ownRecRes.status).toBe(200);
+
+    // 6. Patient CANNOT open another record (403)
+    const otherRecRes = await request(app)
+      .get('/api/patients/MV-2026-0001')
+      .set('Authorization', `Bearer ${token}`);
+    expect(otherRecRes.status).toBe(403);
+  });
+
+  test('6. Auto-link does NOT guess if multiple unlinked patients share the same email (refuses ambiguous link)', async () => {
+    const sharedEmail = 'shared.family@medivault.test';
+
+    // Insert 2 unlinked patients directly sharing the same email
+    await query(`
+      INSERT INTO patients (patient_id, first_name, last_name, dob, gender, blood_group, phone, email, is_deleted)
+      VALUES 
+        ('MV-TEST-AMB1', 'FamilyOne', 'Member', '1970-01-01', 'Male', 'O+', '+1 (555) 111-0001', ?, 0),
+        ('MV-TEST-AMB2', 'FamilyTwo', 'Member', '1972-02-02', 'Female', 'O+', '+1 (555) 111-0002', ?, 0)
+    `, [sharedEmail, sharedEmail]);
+
+    // Create user with that email
+    const bcrypt = require('bcryptjs');
+    const pwdHash = await bcrypt.hash('Password@123', 10);
+    await query(
+      "INSERT INTO users (name, email, password_hash, role) VALUES ('Family User', ?, ?, 'Patient')",
+      [sharedEmail, pwdHash]
+    );
+
+    // Login does NOT guess which patient to link
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: sharedEmail, password: 'Password@123' });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.data.user.patientId).toBeNull();
+    expect(loginRes.body.data.user.patientCode).toBeNull();
+  });
+
+  test('7. Self-Service Activation: validates Patient ID, DOB, and email; rejects mismatches with generic error', async () => {
+    const actEmail = 'self.activate@medivault.test';
+    const actDob = '1984-11-25';
+
+    // 1. Create unlinked patient
+    const createPat = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'Self',
+        last_name: 'Activator',
+        dob: actDob,
+        gender: 'Male',
+        blood_group: 'A+',
+        phone: '+1 (555) 987-6543',
+        email: actEmail,
+        create_login: false
+      });
+    const patCode = createPat.body.data.patient_id;
+
+    // A. Mismatch: Wrong DOB returns 400 with generic error (no enumeration)
+    const wrongDobRes = await request(app)
+      .post('/api/auth/activate-patient')
+      .send({
+        patient_id: patCode,
+        dob: '1999-01-01',
+        email: actEmail,
+        password: 'SecurePassword@123'
+      });
+    expect(wrongDobRes.status).toBe(400);
+    expect(wrongDobRes.body.message).toMatch(/Account activation failed/i);
+
+    // B. Mismatch: Wrong Email returns 400 with generic error
+    const wrongEmailRes = await request(app)
+      .post('/api/auth/activate-patient')
+      .send({
+        patient_id: patCode,
+        dob: actDob,
+        email: 'wrong.email@medivault.test',
+        password: 'SecurePassword@123'
+      });
+    expect(wrongEmailRes.status).toBe(400);
+    expect(wrongEmailRes.body.message).toMatch(/Account activation failed/i);
+
+    // C. Mismatch: Wrong Patient ID returns 400 with generic error
+    const wrongIdRes = await request(app)
+      .post('/api/auth/activate-patient')
+      .send({
+        patient_id: 'MV-9999-9999',
+        dob: actDob,
+        email: actEmail,
+        password: 'SecurePassword@123'
+      });
+    expect(wrongIdRes.status).toBe(400);
+    expect(wrongIdRes.body.message).toMatch(/Account activation failed/i);
+
+    // D. Valid activation succeeds (201)
+    const validRes = await request(app)
+      .post('/api/auth/activate-patient')
+      .send({
+        patient_id: patCode,
+        dob: actDob,
+        email: actEmail,
+        password: 'SecurePassword@123'
+      });
+    expect(validRes.status).toBe(201);
+    expect(validRes.body.success).toBe(true);
+
+    // E. Subsequent activation attempt on already-activated record fails (400)
+    const repeatRes = await request(app)
+      .post('/api/auth/activate-patient')
+      .send({
+        patient_id: patCode,
+        dob: actDob,
+        email: actEmail,
+        password: 'SecurePassword@123'
+      });
+    expect(repeatRes.status).toBe(400);
+    expect(repeatRes.body.message).toMatch(/Account activation failed/i);
+
+    // F. Activated patient logs in and accesses their medical record
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: actEmail, password: 'SecurePassword@123' });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.data.user.patientCode).toBe(patCode);
+
+    const token = loginRes.body.data.token;
+    const patRecordRes = await request(app)
+      .get(`/api/patients/${patCode}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(patRecordRes.status).toBe(200);
+    expect(patRecordRes.body.data.patient_id).toBe(patCode);
+  });
+
+  test('8. Database startup migration is idempotent and runs cleanly on repeat calls', async () => {
+    await expect(initDatabase('medivault_test')).resolves.not.toThrow();
+  });
+});
+
 
 

@@ -88,6 +88,14 @@ const api = {
     return res.data;
   },
 
+  async activatePatient(data) {
+    const res = await request('/auth/activate-patient', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    return res.data;
+  },
+
   // Users
   async getUsers(role = '') {
     const query = role ? `?role=${encodeURIComponent(role)}` : '';
@@ -103,10 +111,23 @@ const api = {
     return res.data;
   },
 
+  async linkPatientToUser(userId, patientId) {
+    const res = await request(`/users/${userId}/link-patient`, {
+      method: 'POST',
+      body: JSON.stringify({ patient_id: patientId })
+    });
+    return res.data;
+  },
+
   // Patients
   async getPatients(params = {}) {
     const searchParams = new URLSearchParams(params).toString();
     const res = await request(`/patients${searchParams ? '?' + searchParams : ''}`);
+    return res.data;
+  },
+
+  async getUnlinkedPatients() {
+    const res = await request('/patients?unlinked=true&limit=100');
     return res.data;
   },
 

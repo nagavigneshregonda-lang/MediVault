@@ -11,6 +11,7 @@ router.get('/', usersController.listUsers);
 
 // Admin-only management
 router.post('/', authorizeRoles('Admin'), usersController.createUser);
+router.post('/:id/link-patient', authorizeRoles('Admin'), usersController.linkPatientToUser);
 router.put('/:id', authorizeRoles('Admin'), usersController.updateUser);
 
 module.exports = router;

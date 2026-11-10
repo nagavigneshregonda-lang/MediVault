@@ -304,3 +304,16 @@ Incoming Request for Patient Chart
 - **Logical Backup (`mysqldump`)**: Generates SQL text scripts containing `CREATE TABLE` and `INSERT` statements (`mysqldump -u root -p medivault > backup.sql`). Easily inspected and portable across MySQL versions.
 - **Physical Backup (MySQL Enterprise Backup / Percona XtraBackup)**: Copies raw InnoDB data files and redo log blocks at the binary level without blocking client transactions, ideal for databases in the hundreds of gigabytes.
 - **Restoration**: `mysql -u root -p medivault < backup.sql` or applying binary logs (Point-in-Time Recovery).
+
+### Q21: How does MediVault enforce the 1-to-1 Patient Account Linking Rule?
+**Answer**:
+- **Database Layer**: MediVault defines `patients.user_id INT UNIQUE DEFAULT NULL` with a foreign key constraint to `users(id)`. The `UNIQUE` constraint guarantees at the database engine level that no patient profile can be linked to more than one user account, and vice-versa.
+- **Application Layer**: Creating a Patient-role user in User Management requires providing an unlinked patient ID. Both creation and linking execute inside an atomic MySQL transaction (`START TRANSACTION` ... `COMMIT`).
+- **Auto-Linking Logic**: On login and on `/api/auth/me`, if a Patient-role user is unlinked, the backend automatically matches against unlinked patient records by exact case-insensitive trimmed email (`LOWER(TRIM(email))`). If exactly one match exists, it auto-links them in a transaction with an audit log. If zero or multiple matches exist, it safely refrains from guessing and directs the patient to self-service activation.
+
+### Q22: Explain the security design of the Self-Service Patient Portal Activation (`/api/auth/activate-patient`).
+**Answer**:
+- **3-Point Verification**: The patient must provide three independent identifiers matching the hospital's clinical records: Hospital Patient ID (e.g. `MV-2026-0059`), Date of Birth (normalized to `YYYY-MM-DD`), and registered email address.
+- **Anti-Enumeration Protection**: All mismatch conditions (wrong ID, wrong DOB, wrong email, or already activated) return an identical generic error message (`"Account activation failed. Please verify your Patient ID, Date of Birth, and registered email address, or contact your healthcare clinic."`). This prevents attackers from probing which patient IDs or emails exist.
+- **Brute-Force Rate Limiting**: The endpoint is gated by an aggressive IP rate limiter (`express-rate-limit`: max 10 attempts per 15 minutes).
+- **Atomic Credential Creation**: The account creation (`users` table insert) and foreign key link (`patients.user_id` update) happen inside a single ACID transaction with an immutable audit log entry.

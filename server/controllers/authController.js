@@ -1,10 +1,83 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { query } = require('../config/db');
+const { query, getConnection } = require('../config/db');
 const { JWT_SECRET } = require('../middleware/auth');
 const { successResponse, errorResponse } = require('../utils/response');
 const { logAudit } = require('../middleware/auditLogger');
-const { validatePassword } = require('../utils/helpers');
+const { validatePassword, isValidEmail } = require('../utils/helpers');
+
+/**
+ * Auto-link a Patient-role user to their matching patient record if exactly one unlinked record matches by email.
+ * If zero or multiple matches exist, does not guess and returns null.
+ */
+async function autoLinkPatientUser(userId, userEmail, clientIp = '127.0.0.1') {
+  if (!userId || !userEmail) return null;
+
+  // 1. Check if user already has a linked patient record
+  const [existing] = await query(
+    'SELECT id, patient_id FROM patients WHERE user_id = ? AND is_deleted = 0 LIMIT 1',
+    [userId]
+  );
+  if (existing.length > 0) {
+    return existing[0];
+  }
+
+  // 2. Query unlinked patient records with exact case-insensitive trimmed email match
+  const cleanEmail = userEmail.trim().toLowerCase();
+  const [matches] = await query(
+    'SELECT id, patient_id, first_name, last_name FROM patients WHERE user_id IS NULL AND is_deleted = 0 AND LOWER(TRIM(email)) = ?',
+    [cleanEmail]
+  );
+
+  // 3. Exactly one match -> auto-link inside a transaction with audit log
+  if (matches.length === 1) {
+    const targetPatient = matches[0];
+    let conn = null;
+    try {
+      conn = await getConnection();
+      await conn.beginTransaction();
+
+      // Double-check row is still unlinked within transaction
+      const [recheck] = await conn.query(
+        'SELECT id, patient_id FROM patients WHERE id = ? AND user_id IS NULL AND is_deleted = 0 FOR UPDATE',
+        [targetPatient.id]
+      );
+
+      if (recheck.length === 1) {
+        await conn.query(
+          'UPDATE patients SET user_id = ?, updated_at = NOW() WHERE id = ?',
+          [userId, targetPatient.id]
+        );
+        await conn.commit();
+
+        logAudit({
+          userId: userId,
+          userEmail: cleanEmail,
+          userRole: 'Patient',
+          action: 'LINK',
+          resource: 'PATIENT',
+          resourceId: targetPatient.patient_id,
+          details: `Auto-linked patient record ${targetPatient.patient_id} to user ${cleanEmail} based on exact email match`,
+          ipAddress: clientIp
+        }).catch(() => {});
+
+        return { id: targetPatient.id, patient_id: targetPatient.patient_id };
+      } else {
+        await conn.rollback();
+      }
+    } catch (err) {
+      if (conn) {
+        try { await conn.rollback(); } catch (_) {}
+      }
+      console.error('Error during autoLinkPatientUser transaction:', err);
+    } finally {
+      if (conn) conn.release();
+    }
+  }
+
+  // If 0 or >1 matches, do not guess
+  return null;
+}
 
 async function login(req, res) {
   try {
@@ -29,11 +102,17 @@ async function login(req, res) {
       return errorResponse(res, 'Invalid email or password.', 401);
     }
 
-    // Find linked patient id if role is Patient
+    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
+
+    // Find linked patient id if role is Patient (with auto-linking fallback)
     let linkedPatient = null;
     if (user.role === 'Patient') {
       const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ? AND is_deleted = 0 LIMIT 1', [user.id]);
       linkedPatient = patientRows[0] || null;
+
+      if (!linkedPatient) {
+        linkedPatient = await autoLinkPatientUser(user.id, user.email, ip);
+      }
     }
 
     const payload = {
@@ -55,7 +134,6 @@ async function login(req, res) {
       maxAge: 24 * 60 * 60 * 1000
     });
 
-    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
     logAudit({
       userId: user.id,
       userEmail: user.email,
@@ -94,10 +172,15 @@ async function login(req, res) {
 
 async function getMe(req, res) {
   try {
+    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
     let linkedPatient = null;
     if (req.user.role === 'Patient') {
       const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ? AND is_deleted = 0 LIMIT 1', [req.user.id]);
       linkedPatient = patientRows[0] || null;
+
+      if (!linkedPatient) {
+        linkedPatient = await autoLinkPatientUser(req.user.id, req.user.email, ip);
+      }
     }
 
     const patientId = linkedPatient ? linkedPatient.id : (req.user.patientId || null);
@@ -112,6 +195,132 @@ async function getMe(req, res) {
     }, 'Current user fetched');
   } catch (err) {
     return errorResponse(res, 'Failed to retrieve profile.', 500);
+  }
+}
+
+/**
+ * Self-service patient portal account activation
+ * Validates Patient ID, Date of Birth, and registered email against the patient record.
+ * Uses generic error messages to prevent account enumeration.
+ */
+async function activatePatientAccount(req, res) {
+  let conn = null;
+  try {
+    const { patient_id, dob, email, password } = req.body;
+
+    const genericError = 'Account activation failed. Please verify your Patient ID, Date of Birth, and registered email address, or contact your healthcare clinic.';
+
+    if (!patient_id || !dob || !email || !password) {
+      return errorResponse(res, 'Patient ID, Date of Birth, registered email address, and new password are required.', 400);
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isValidEmail(cleanEmail)) {
+      return errorResponse(res, 'Please provide a valid email address.', 400);
+    }
+
+    const pwdCheck = validatePassword(password);
+    if (!pwdCheck.valid) {
+      return errorResponse(res, pwdCheck.message, 400);
+    }
+
+    // Look up patient by patient_id code or numeric id
+    const [patientRows] = await query(
+      'SELECT * FROM patients WHERE (patient_id = ? OR id = ?) AND is_deleted = 0',
+      [patient_id.trim(), patient_id.trim()]
+    );
+    const patient = patientRows[0];
+
+    if (!patient) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    // Must not already have a linked user account
+    if (patient.user_id !== null && patient.user_id !== undefined) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    // Registered email check (case-insensitive, trimmed)
+    if (!patient.email || patient.email.trim().toLowerCase() !== cleanEmail) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    // Date of birth check (normalize to YYYY-MM-DD)
+    let patDobStr = '';
+    let inputDobStr = '';
+    try {
+      patDobStr = new Date(patient.dob).toISOString().split('T')[0];
+      inputDobStr = new Date(dob).toISOString().split('T')[0];
+    } catch (_) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    if (!patDobStr || !inputDobStr || patDobStr !== inputDobStr) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    // Check if user account with this email already exists
+    const [existingUsers] = await query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
+      [cleanEmail]
+    );
+    if (existingUsers.length > 0) {
+      return errorResponse(res, genericError, 400);
+    }
+
+    // Hash password with bcrypt
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Atomically create user and link patient in one transaction
+    conn = await getConnection();
+    await conn.beginTransaction();
+
+    const [userInsert] = await conn.query(`
+      INSERT INTO users (name, email, password_hash, role, phone)
+      VALUES (?, ?, ?, 'Patient', ?)
+    `, [
+      `${patient.first_name} ${patient.last_name}`.trim(),
+      cleanEmail,
+      passwordHash,
+      patient.phone || null
+    ]);
+
+    const newUserId = userInsert.insertId;
+
+    await conn.query(`
+      UPDATE patients 
+      SET user_id = ?, updated_at = NOW() 
+      WHERE id = ? AND user_id IS NULL
+    `, [newUserId, patient.id]);
+
+    await conn.commit();
+
+    const ip = req.ip || (Array.isArray(req.headers['x-forwarded-for']) ? req.headers['x-forwarded-for'][0] : (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '127.0.0.1';
+
+    logAudit({
+      userId: newUserId,
+      userEmail: cleanEmail,
+      userRole: 'Patient',
+      action: 'ACTIVATE',
+      resource: 'PATIENT',
+      resourceId: patient.patient_id,
+      details: `Patient successfully activated self-service portal account for record ${patient.patient_id}`,
+      ipAddress: Array.isArray(ip) ? ip[0] : ip
+    }).catch(() => {});
+
+    return successResponse(res, {
+      email: cleanEmail,
+      patient_id: patient.patient_id
+    }, 'Account successfully activated. You can now log in with your email and password.', 201);
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('activatePatientAccount error:', err);
+    return errorResponse(res, 'An error occurred during account activation. Please try again.', 500);
+  } finally {
+    if (conn) conn.release();
   }
 }
 
@@ -192,5 +401,7 @@ module.exports = {
   login,
   getMe,
   logout,
-  changePassword
+  changePassword,
+  autoLinkPatientUser,
+  activatePatientAccount
 };

@@ -19,6 +19,7 @@ async function listPatients(req, res) {
       blood_group = '',
       gender = '',
       status = 'active', // active, archived, all
+      unlinked = '',
       page = 1,
       limit = 10,
       sortBy = 'created_at',
@@ -31,6 +32,11 @@ async function listPatients(req, res) {
 
     const whereConditions = [];
     const params = [];
+
+    // Filter unlinked patients only (for account linking workflows)
+    if (unlinked === 'true' || unlinked === true || unlinked === '1') {
+      whereConditions.push('p.user_id IS NULL');
+    }
 
     // Role-based visibility
     if (user.role === 'Patient') {
@@ -282,7 +288,9 @@ async function createPatient(req, res) {
       );
     }
 
-    const wantsLogin = Boolean(create_login || create_patient_login || (req.user && req.user.role === 'Admin' && email && email.trim()));
+    const wantsLogin = (create_login === false || create_patient_login === false)
+      ? false
+      : Boolean(create_login || create_patient_login || (req.user && req.user.role === 'Admin' && email && email.trim()));
     let linkedUserId = user_id || null;
     let temporaryPassword = null;
     let targetLoginEmail = null;

@@ -70,6 +70,12 @@ export function renderLoginView() {
             <button type="submit" id="login-submit-btn" class="btn btn-primary" style="width:100%; padding:0.8rem; margin-top:0.75rem;">
               <i class="fa-solid fa-right-to-bracket"></i> Sign In to Account
             </button>
+
+            <div style="margin-top: 1rem; text-align: center;">
+              <a href="#activate" style="font-size: 0.88rem; color: var(--primary); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; gap: 0.4rem;">
+                <i class="fa-solid fa-id-card-clip"></i> Activate my patient account
+              </a>
+            </div>
           </form>
 
           <!-- 1-Click Role Demo Auto-fill -->

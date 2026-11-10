@@ -7,6 +7,7 @@ import { renderNavbar } from './components/navbar.js';
 import { renderSidebar } from './components/sidebar.js';
 import { renderLandingView } from './views/landingView.js';
 import { renderLoginView, initLoginListeners } from './views/loginView.js';
+import { renderActivateView, initActivateListeners } from './views/activateView.js';
 import { renderDashboardView, initDashboardListeners } from './views/dashboardView.js';
 import { renderPatientsView, initPatientsListeners } from './views/patientsView.js';
 import { renderPatientDetailView, initPatientDetailListeners } from './views/patientDetailView.js';
@@ -28,7 +29,7 @@ export async function handleRouteChange() {
   const isAuth = Store.isAuthenticated();
 
   // Route Guards
-  const publicRoutes = ['#landing', '#login'];
+  const publicRoutes = ['#landing', '#login', '#activate'];
   if (!isAuth && !publicRoutes.includes(hash)) {
     window.location.hash = '#login';
     return;
@@ -49,6 +50,17 @@ export async function handleRouteChange() {
     }
     root.innerHTML = renderLoginView();
     initLoginListeners();
+    return;
+  }
+
+  // 2b. Patient Portal Self-Service Activation View
+  if (hash === '#activate') {
+    if (isAuth) {
+      window.location.hash = '#dashboard';
+      return;
+    }
+    root.innerHTML = renderActivateView();
+    initActivateListeners();
     return;
   }
 
@@ -127,11 +139,16 @@ export async function handleRouteChange() {
                 <h2 style="font-size:1.6rem; margin-bottom:0.75rem;">No Linked Medical Record Found</h2>
                 <p style="color:var(--text-muted); font-size:1rem; line-height:1.6; margin-bottom:1.75rem;">
                   Your patient login account (<strong>${user.email || 'User'}</strong>) is not currently associated with a clinical profile in the system. 
-                  Please contact the hospital administrator or your attending clinic to link your patient record.
+                  Please activate your patient account using your hospital records or contact the administrator to link your profile.
                 </p>
-                <a href="#dashboard" class="btn btn-primary">
-                  <i class="fa-solid fa-house"></i> Return to Dashboard
-                </a>
+                <div style="display:flex; justify-content:center; gap:1rem; flex-wrap:wrap;">
+                  <a href="#activate" class="btn btn-secondary">
+                    <i class="fa-solid fa-id-card-clip"></i> Self-Service Account Activation
+                  </a>
+                  <a href="#dashboard" class="btn btn-primary">
+                    <i class="fa-solid fa-house"></i> Return to Dashboard
+                  </a>
+                </div>
               </div>
             </div>
           `;

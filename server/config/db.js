@@ -149,6 +149,70 @@ async function runStartupMigrations(conn, dbName) {
         }
       }
     }
+
+    // 2. Safe, idempotent auto-linking of unlinked Patient users
+    let autoLinkedCount = 0;
+
+    // Specific linking check: user nagavigneshregonda@gmail.com to patient MV-2026-0059
+    try {
+      const [nagaUsers] = await conn.query(`
+        SELECT id, email FROM users WHERE LOWER(email) = 'nagavigneshregonda@gmail.com' AND role = 'Patient'
+      `);
+      if (nagaUsers.length > 0) {
+        const uId = nagaUsers[0].id;
+        const [nagaLink] = await conn.query(`
+          SELECT id FROM patients WHERE user_id = ? AND is_deleted = 0
+        `, [uId]);
+        if (nagaLink.length === 0) {
+          const [targetPat] = await conn.query(`
+            SELECT id FROM patients WHERE patient_id = 'MV-2026-0059' AND user_id IS NULL AND is_deleted = 0
+          `);
+          if (targetPat.length > 0) {
+            await conn.query(`
+              UPDATE patients SET user_id = ?, updated_at = NOW() WHERE id = ?
+            `, [uId, targetPat[0].id]);
+            autoLinkedCount++;
+            console.log(`[MIGRATION] Linked nagavigneshregonda@gmail.com to patient MV-2026-0059.`);
+          }
+        }
+      }
+    } catch (nagaErr) {
+      console.warn(`[MIGRATION] Notice checking nagavigneshregonda link: ${nagaErr.message}`);
+    }
+
+    // General auto-link: unlinked Patient users by exact email match (only if exactly 1 unlinked match)
+    try {
+      const [unlinkedPatientUsers] = await conn.query(`
+        SELECT u.id, u.email 
+        FROM users u
+        LEFT JOIN patients p ON p.user_id = u.id AND p.is_deleted = 0
+        WHERE u.role = 'Patient' AND p.id IS NULL
+      `);
+
+      for (const u of unlinkedPatientUsers) {
+        const cleanEmail = (u.email || '').trim().toLowerCase();
+        if (!cleanEmail) continue;
+
+        const [matchingPatients] = await conn.query(`
+          SELECT id, patient_id FROM patients 
+          WHERE user_id IS NULL AND is_deleted = 0 AND LOWER(TRIM(email)) = ?
+        `, [cleanEmail]);
+
+        if (matchingPatients.length === 1) {
+          await conn.query(`
+            UPDATE patients SET user_id = ?, updated_at = NOW() WHERE id = ?
+          `, [u.id, matchingPatients[0].id]);
+          autoLinkedCount++;
+          console.log(`[MIGRATION] Auto-linked Patient user ${u.email} to patient ${matchingPatients[0].patient_id}.`);
+        }
+      }
+    } catch (linkErr) {
+      console.warn(`[MIGRATION] Notice auto-linking unlinked patient accounts: ${linkErr.message}`);
+    }
+
+    if (autoLinkedCount > 0) {
+      console.log(`[MIGRATION] Auto-linked ${autoLinkedCount} unlinked Patient user account(s).`);
+    }
   } catch (migErr) {
     console.warn(`[MIGRATION] Startup migration check warning: ${migErr.message}`);
   }
