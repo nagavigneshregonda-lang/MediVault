@@ -65,9 +65,27 @@ async function listAllTests(req, res) {
     const conditions = ['p.is_deleted = 0'];
     const params = [];
 
+    // Role-based visibility: Doctors only see tests they ordered or for patients they have access to
+    if (req.user.role === 'Doctor') {
+      conditions.push(`(
+        tr.ordered_by_doctor_id = ? OR 
+        p.assigned_doctor_id = ? OR 
+        p.id IN (
+          SELECT pag.patient_id FROM patient_access_grants pag 
+          WHERE pag.doctor_id = ? AND pag.status = 'Granted' 
+            AND (pag.expires_at IS NULL OR pag.expires_at > NOW())
+        )
+      )`);
+      params.push(req.user.id, req.user.id, req.user.id);
+    }
+
     if (status) {
-      conditions.push('tr.status = ?');
-      params.push(status);
+      if (status.toLowerCase() === 'queue') {
+        conditions.push("tr.status IN ('Ordered', 'In Progress')");
+      } else {
+        conditions.push('tr.status = ?');
+        params.push(status);
+      }
     }
 
     if (category) {

@@ -105,6 +105,56 @@ function buildConnectionOptions(customDbName, includeDatabase = true) {
 }
 
 /**
+ * Idempotent startup migrations for database evolution
+ * Ensures columns, constraints and indexes exist without wiping existing production data
+ */
+async function runStartupMigrations(conn, dbName) {
+  try {
+    // 1. Verify patients.user_id column
+    const [cols] = await conn.query(`
+      SELECT COLUMN_NAME 
+      FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'patients' AND COLUMN_NAME = 'user_id'
+    `, [dbName]);
+
+    if (cols.length === 0) {
+      console.log(`[MIGRATION] Adding 'user_id' column to 'patients' table in '${dbName}'...`);
+      await conn.query(`
+        ALTER TABLE patients 
+        ADD COLUMN user_id INT UNIQUE DEFAULT NULL AFTER patient_id
+      `);
+      try {
+        await conn.query(`
+          ALTER TABLE patients 
+          ADD CONSTRAINT fk_patients_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        `);
+      } catch (fkErr) {
+        console.warn(`[MIGRATION] Notice: Could not add fk_patients_user: ${fkErr.message}`);
+      }
+      console.log(`[MIGRATION] 'user_id' column successfully added to 'patients'.`);
+    } else {
+      // Column exists, verify UNIQUE index on user_id
+      const [indexes] = await conn.query(`
+        SELECT INDEX_NAME 
+        FROM information_schema.STATISTICS 
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'patients' AND COLUMN_NAME = 'user_id' AND NON_UNIQUE = 0
+      `, [dbName]);
+
+      if (indexes.length === 0) {
+        console.log(`[MIGRATION] Ensuring UNIQUE constraint on 'patients.user_id'...`);
+        try {
+          await conn.query(`ALTER TABLE patients ADD UNIQUE (user_id)`);
+        } catch (idxErr) {
+          console.warn(`[MIGRATION] Notice: Unique constraint check: ${idxErr.message}`);
+        }
+      }
+    }
+  } catch (migErr) {
+    console.warn(`[MIGRATION] Startup migration check warning: ${migErr.message}`);
+  }
+}
+
+/**
  * Initialize database, create schema if missing, and auto-seed if empty
  * Handles managed cloud instances (Aiven) where CREATE DATABASE is pre-managed or restricted
  */
@@ -203,6 +253,9 @@ async function initDatabase(customDbName) {
       const schemaSql = fs.readFileSync(schemaPath, 'utf8');
       await conn.query(schemaSql);
       console.log(`[DB INIT] Schema applied successfully.`);
+    } else {
+      // Run idempotent startup migrations on existing databases
+      await runStartupMigrations(conn, dbName);
     }
 
     // 7. Check if auto-seed is required (empty users table)

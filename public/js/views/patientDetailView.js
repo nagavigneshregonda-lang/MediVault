@@ -44,6 +44,7 @@ export async function renderPatientDetailView(patientId) {
               <span id="banner-demographics"><i class="fa-solid fa-cake-candles"></i> Age: -- &bull; Gender: --</span>
               <span id="banner-phone"><i class="fa-solid fa-phone"></i> --</span>
               <span id="banner-doctor"><i class="fa-solid fa-user-doctor"></i> Doctor: --</span>
+              <span id="banner-login"><i class="fa-solid fa-key"></i> Login: --</span>
             </div>
           </div>
         </div>
@@ -122,8 +123,10 @@ function populateHeaderBanner(p) {
   const demo = document.getElementById('banner-demographics');
   const phone = document.getElementById('banner-phone');
   const doc = document.getElementById('banner-doctor');
+  const loginBanner = document.getElementById('banner-login');
   const allergyAlert = document.getElementById('patient-allergy-alert');
   const allergyText = document.getElementById('allergy-alert-text');
+  const actionsContainer = document.getElementById('patient-header-actions');
 
   if (avatar) avatar.textContent = initials;
   if (name) name.textContent = `${p.first_name} ${p.last_name}`;
@@ -132,6 +135,35 @@ function populateHeaderBanner(p) {
   if (demo) demo.innerHTML = `<i class="fa-solid fa-cake-candles"></i> Age: ${p.age !== null ? p.age : 'N/A'} yrs &bull; Gender: ${p.gender}`;
   if (phone) phone.innerHTML = `<i class="fa-solid fa-phone"></i> ${p.phone}`;
   if (doc) doc.innerHTML = `<i class="fa-solid fa-user-doctor"></i> Doctor: ${p.doctor ? p.doctor.name : 'Unassigned'}`;
+  if (loginBanner) {
+    loginBanner.innerHTML = `<i class="fa-solid fa-key"></i> Login: ${p.has_login ? '<strong style="color:var(--emerald);">Active</strong>' : '<span style="color:var(--text-muted);">Not created</span>'}`;
+  }
+
+  // Header Actions (Admin Patient Login Management)
+  const user = Store.state.user;
+  if (actionsContainer && user.role === 'Admin') {
+    if (!p.has_login) {
+      actionsContainer.innerHTML = `
+        <button id="btn-create-patient-login" class="btn btn-primary btn-sm">
+          <i class="fa-solid fa-user-plus"></i> Create Patient Login
+        </button>
+      `;
+      const btn = document.getElementById('btn-create-patient-login');
+      if (btn) {
+        btn.addEventListener('click', () => openDetailCreateLoginModal(p));
+      }
+    } else {
+      actionsContainer.innerHTML = `
+        <button id="btn-reset-patient-password" class="btn btn-secondary btn-sm">
+          <i class="fa-solid fa-key"></i> Reset Password
+        </button>
+      `;
+      const btn = document.getElementById('btn-reset-patient-password');
+      if (btn) {
+        btn.addEventListener('click', () => openDetailResetPasswordModal(p));
+      }
+    }
+  }
 
   if (p.allergies && p.allergies.trim()) {
     if (allergyAlert) allergyAlert.style.display = 'flex';
@@ -191,6 +223,7 @@ async function renderOverviewTab(container) {
           <div><strong style="color:var(--text-muted);">Email:</strong> ${p.email || 'Not provided'}</div>
           <div><strong style="color:var(--text-muted);">Phone:</strong> ${p.phone}</div>
           <div><strong style="color:var(--text-muted);">Address:</strong> ${p.address || 'Not recorded'}</div>
+          <div><strong style="color:var(--text-muted);">Portal Account:</strong> ${p.has_login ? `<span class="badge badge-normal"><i class="fa-solid fa-circle-check"></i> Active (${p.loginAccount ? p.loginAccount.email : (p.email || 'Configured')})</span>` : `<span class="badge badge-info"><i class="fa-solid fa-circle-minus"></i> Not created</span>`}</div>
         </div>
       </div>
 
@@ -1471,4 +1504,270 @@ function openGrantAccessModal() {
       saveBtn.innerHTML = '<i class="fa-solid fa-shield-check"></i> Authorize Doctor';
     }
   });
+}
+
+function openDetailCreateLoginModal(patient) {
+  const bodyHtml = `
+    <form id="detail-create-login-form">
+      <div style="margin-bottom:1rem; padding:0.75rem 1rem; background:var(--primary-light); border-radius:var(--radius-md);">
+        <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${patient.first_name} ${patient.last_name} &bull; ${patient.patient_id}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Provision a new Patient Portal account linked to this record</div>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Portal Login Email *</label>
+        <input type="email" id="dtl-prov-email" class="form-control" value="${patient.email || ''}" placeholder="patient@example.com" required>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.85rem; margin-bottom:1rem;">
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="dtl-pw-type" value="temp" checked>
+          <span>Auto-generate secure temporary password (recommended)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="dtl-pw-type" value="custom">
+          <span>Set custom password</span>
+        </label>
+        <div id="dtl-custom-pw-box" style="display:none; margin-top:0.35rem;">
+          <input type="password" id="dtl-custom-pw" class="form-control" placeholder="At least 8 characters (letters + numbers)" autocomplete="new-password">
+          <small style="color:var(--text-muted); font-size:0.75rem;">Minimum 8 characters with at least one letter and one number.</small>
+        </div>
+      </div>
+    </form>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
+    <button class="btn btn-primary modal-save-btn">
+      <i class="fa-solid fa-key"></i> Create Account
+    </button>
+  `;
+
+  openModal({
+    title: 'Provision Patient Portal Login',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '500px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const customPwBox = modalEl.querySelector('#dtl-custom-pw-box');
+  modalEl.querySelectorAll('input[name="dtl-pw-type"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (customPwBox) customPwBox.style.display = r.value === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  const saveBtn = modalEl.querySelector('.modal-save-btn');
+  modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+  saveBtn.addEventListener('click', async () => {
+    const email = modalEl.querySelector('#dtl-prov-email').value.trim();
+    const pwType = modalEl.querySelector('input[name="dtl-pw-type"]:checked')?.value || 'temp';
+    const customPw = modalEl.querySelector('#dtl-custom-pw')?.value || '';
+
+    if (!email) {
+      showToast('Login email is required.', 'warning');
+      return;
+    }
+
+    if (pwType === 'custom') {
+      if (!customPw || customPw.length < 8 || !/[A-Za-z]/.test(customPw) || !/[0-9]/.test(customPw)) {
+        showToast('Password must be at least 8 characters long and contain letters and numbers.', 'warning');
+        return;
+      }
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Provisioning...';
+
+    try {
+      const payload = {
+        email,
+        generate_temporary: pwType === 'temp'
+      };
+      if (pwType === 'custom') {
+        payload.password = customPw;
+      }
+
+      const res = await api.createPatientLogin(patient.id, payload);
+      closeModal();
+
+      patient.has_login = true;
+      patient.loginAccount = { email };
+      populateHeaderBanner(patient);
+      if (currentTab === 'overview') switchTab('overview');
+
+      if (res.temporary_password) {
+        showTemporaryPasswordDisplay(email, res.temporary_password, `${patient.first_name} ${patient.last_name}`);
+      } else {
+        showToast(`Login created successfully for ${patient.first_name}!`, 'success');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-key"></i> Create Account';
+    }
+  });
+}
+
+function openDetailResetPasswordModal(patient) {
+  const bodyHtml = `
+    <form id="detail-reset-password-form">
+      <div style="margin-bottom:1rem; padding:0.75rem 1rem; background:var(--rose-light); border-radius:var(--radius-md);">
+        <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${patient.first_name} ${patient.last_name} &bull; ${patient.patient_id}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Reset password for linked user account</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.85rem; margin-bottom:1rem;">
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="reset-pw-type" value="temp" checked>
+          <span>Generate new temporary password (recommended)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="reset-pw-type" value="custom">
+          <span>Set new custom password</span>
+        </label>
+        <div id="reset-custom-pw-box" style="display:none; margin-top:0.35rem;">
+          <input type="password" id="reset-custom-pw" class="form-control" placeholder="At least 8 characters (letters + numbers)" autocomplete="new-password">
+          <small style="color:var(--text-muted); font-size:0.75rem;">Minimum 8 characters with at least one letter and one number.</small>
+        </div>
+      </div>
+    </form>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
+    <button class="btn btn-danger modal-save-btn">
+      <i class="fa-solid fa-key"></i> Reset Password
+    </button>
+  `;
+
+  openModal({
+    title: 'Reset Patient Account Password',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '500px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const customPwBox = modalEl.querySelector('#reset-custom-pw-box');
+  modalEl.querySelectorAll('input[name="reset-pw-type"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (customPwBox) customPwBox.style.display = r.value === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  const saveBtn = modalEl.querySelector('.modal-save-btn');
+  modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+  saveBtn.addEventListener('click', async () => {
+    const pwType = modalEl.querySelector('input[name="reset-pw-type"]:checked')?.value || 'temp';
+    const customPw = modalEl.querySelector('#reset-custom-pw')?.value || '';
+
+    if (pwType === 'custom') {
+      if (!customPw || customPw.length < 8 || !/[A-Za-z]/.test(customPw) || !/[0-9]/.test(customPw)) {
+        showToast('Password must be at least 8 characters long and contain letters and numbers.', 'warning');
+        return;
+      }
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Resetting...';
+
+    try {
+      const payload = {
+        generate_temporary: pwType === 'temp'
+      };
+      if (pwType === 'custom') {
+        payload.password = customPw;
+      }
+
+      const res = await api.resetPatientPassword(patient.id, payload);
+      closeModal();
+
+      if (res.temporary_password) {
+        showTemporaryPasswordDisplay(patient.loginAccount?.email || patient.email || 'Patient', res.temporary_password, `${patient.first_name} ${patient.last_name}`);
+      } else {
+        showToast(`Password reset successfully for ${patient.first_name}!`, 'success');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-key"></i> Reset Password';
+    }
+  });
+}
+
+function showTemporaryPasswordDisplay(email, tempPassword, patientName) {
+  const bodyHtml = `
+    <div style="text-align:center; padding:1.25rem 0;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--emerald-light); color:var(--emerald); display:flex; align-items:center; justify-content:center; font-size:1.8rem; margin:0 auto 1rem;">
+        <i class="fa-solid fa-shield-check"></i>
+      </div>
+      <h3 style="margin-bottom:0.5rem; font-size:1.25rem;">Temporary Credentials Generated</h3>
+      <p style="color:var(--text-muted); font-size:0.88rem; max-width:440px; margin:0 auto 1.25rem; line-height:1.5;">
+        Credentials updated for <strong>${patientName}</strong>. 
+        Please copy and provide this temporary password to the patient now. It will <strong>not be displayed again</strong>.
+      </p>
+
+      <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem 1.25rem; max-width:420px; margin:0 auto 1.25rem; text-align:left;">
+        <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Account Email</div>
+        <div style="font-weight:700; color:var(--text-main); margin-bottom:0.75rem; font-size:0.95rem;">${email}</div>
+        
+        <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Temporary Password</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; margin-top:2px;">
+          <code style="font-size:1.2rem; font-weight:800; color:var(--primary); font-family:monospace; letter-spacing:0.06em;" id="temp-pw-detail-text">${tempPassword}</code>
+          <button class="btn btn-primary btn-sm" id="copy-temp-pw-detail-btn" title="Copy credentials to clipboard">
+            <i class="fa-regular fa-copy"></i> Copy Credentials
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-save-btn" style="width:100%;">
+      <i class="fa-solid fa-check"></i> Done &mdash; I have recorded these credentials
+    </button>
+  `;
+
+  openModal({
+    title: 'One-Time Temporary Password',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '520px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const copyBtn = modalEl.querySelector('#copy-temp-pw-detail-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const credText = `Email: ${email}\nPassword: ${tempPassword}`;
+      navigator.clipboard.writeText(credText).then(() => {
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        showToast('Credentials copied to clipboard!', 'info');
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Credentials';
+        }, 2000);
+      }).catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = credText;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        showToast('Credentials copied to clipboard!', 'info');
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Credentials';
+        }, 2000);
+      });
+    });
+  }
+
+  modalEl.querySelector('.modal-save-btn').addEventListener('click', closeModal);
 }

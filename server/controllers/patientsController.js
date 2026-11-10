@@ -1,6 +1,14 @@
-const { query } = require('../config/db');
+const bcrypt = require('bcryptjs');
+const { query, getConnection } = require('../config/db');
 const { successResponse, errorResponse } = require('../utils/response');
-const { generatePatientId, calculateAge, calculateBmi } = require('../utils/helpers');
+const { 
+  generatePatientId, 
+  calculateAge, 
+  calculateBmi, 
+  isValidEmail, 
+  validatePassword, 
+  generateSecurePassword 
+} = require('../utils/helpers');
 const { logAudit } = require('../middleware/auditLogger');
 
 async function listPatients(req, res) {
@@ -101,14 +109,17 @@ async function listPatients(req, res) {
     const safeSortBy = allowedSort.includes(sortBy) ? `p.${sortBy}` : 'p.created_at';
     const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-    // Query patients with doctor names
+    // Query patients with doctor names and login account status
     const querySql = `
       SELECT 
         p.*,
         u.name AS assigned_doctor_name,
-        u.specialization AS doctor_specialization
+        u.specialization AS doctor_specialization,
+        u_login.email AS login_email,
+        CASE WHEN p.user_id IS NOT NULL THEN 1 ELSE 0 END AS has_login
       FROM patients p
       LEFT JOIN users u ON p.assigned_doctor_id = u.id
+      LEFT JOIN users u_login ON p.user_id = u_login.id
       ${whereClause}
       ORDER BY ${safeSortBy} ${safeSortOrder}
       LIMIT ? OFFSET ?
@@ -124,7 +135,8 @@ async function listPatients(req, res) {
         ...pat,
         age,
         bmi: bmi ? bmi.value : null,
-        bmiCategory: bmi ? bmi.category : null
+        bmiCategory: bmi ? bmi.category : null,
+        has_login: Boolean(pat.has_login)
       };
     });
 
@@ -155,6 +167,12 @@ async function getPatientById(req, res) {
         FROM users WHERE id = ?
       `, [patient.assigned_doctor_id]);
       doctor = doctorRows[0] || null;
+    }
+
+    let loginAccount = null;
+    if (patient.user_id) {
+      const [uRows] = await query('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [patient.user_id]);
+      loginAccount = uRows[0] || null;
     }
 
     const [histRows] = await query('SELECT COUNT(*) AS c FROM medical_history WHERE patient_id = ?', [patient.id]);
@@ -195,6 +213,8 @@ async function getPatientById(req, res) {
       age,
       bmi: bmi ? bmi.value : null,
       bmiCategory: bmi ? bmi.category : null,
+      has_login: Boolean(patient.user_id),
+      loginAccount,
       doctor,
       stats: {
         historyCount,
@@ -210,6 +230,7 @@ async function getPatientById(req, res) {
 }
 
 async function createPatient(req, res) {
+  let conn = null;
   try {
     const {
       first_name,
@@ -228,7 +249,12 @@ async function createPatient(req, res) {
       emergency_contact_phone,
       emergency_contact_relation,
       assigned_doctor_id,
-      user_id
+      user_id,
+      create_login,
+      create_patient_login,
+      login_email,
+      login_password,
+      generate_password
     } = req.body;
 
     if (!first_name || !last_name || !dob || !gender || !blood_group || !phone) {
@@ -240,6 +266,7 @@ async function createPatient(req, res) {
       return errorResponse(res, 'Date of birth cannot be in the future.', 400);
     }
 
+    // Duplicate check for existing patient
     const [dupes] = await query(`
       SELECT patient_id, first_name, last_name FROM patients 
       WHERE (phone = ? OR (email IS NOT NULL AND email != '' AND LOWER(email) = LOWER(?)))
@@ -255,6 +282,113 @@ async function createPatient(req, res) {
       );
     }
 
+    const wantsLogin = Boolean(create_login || create_patient_login || (req.user && req.user.role === 'Admin' && email && email.trim()));
+    let linkedUserId = user_id || null;
+    let temporaryPassword = null;
+    let targetLoginEmail = null;
+
+    if (wantsLogin) {
+      targetLoginEmail = (login_email || email || '').trim();
+      if (!isValidEmail(targetLoginEmail)) {
+        return errorResponse(res, 'A valid email address is required to create a patient login.', 400);
+      }
+
+      // Check if user with this email already exists
+      const [existingUsers] = await query(
+        'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
+        [targetLoginEmail]
+      );
+      if (existingUsers.length > 0) {
+        return errorResponse(res, `A user account with email '${targetLoginEmail}' already exists.`, 409);
+      }
+
+      let rawPassword = '';
+      if (generate_password || !login_password) {
+        rawPassword = generateSecurePassword();
+        temporaryPassword = rawPassword;
+      } else {
+        const pwdCheck = validatePassword(login_password);
+        if (!pwdCheck.valid) {
+          return errorResponse(res, pwdCheck.message, 400);
+        }
+        rawPassword = login_password;
+      }
+
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(rawPassword, salt);
+
+      // Execute in ONE transaction
+      conn = await getConnection();
+      await conn.beginTransaction();
+
+      const [userInsert] = await conn.query(`
+        INSERT INTO users (name, email, password_hash, role, phone)
+        VALUES (?, ?, ?, 'Patient', ?)
+      `, [
+        `${first_name.trim()} ${last_name.trim()}`,
+        targetLoginEmail,
+        passwordHash,
+        phone.trim()
+      ]);
+
+      linkedUserId = userInsert.insertId;
+
+      const patientId = await generatePatientId();
+
+      const [patientInsert] = await conn.query(`
+        INSERT INTO patients (
+          patient_id, user_id, first_name, last_name, dob, gender, blood_group,
+          phone, email, address, height_cm, weight_kg, allergies, chronic_conditions,
+          emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+          assigned_doctor_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        patientId,
+        linkedUserId,
+        first_name.trim(),
+        last_name.trim(),
+        dob,
+        gender,
+        blood_group,
+        phone.trim(),
+        email ? email.trim() : targetLoginEmail,
+        address ? address.trim() : null,
+        height_cm ? parseFloat(height_cm) : null,
+        weight_kg ? parseFloat(weight_kg) : null,
+        allergies ? allergies.trim() : '',
+        chronic_conditions ? chronic_conditions.trim() : '',
+        emergency_contact_name ? emergency_contact_name.trim() : null,
+        emergency_contact_phone ? emergency_contact_phone.trim() : null,
+        emergency_contact_relation ? emergency_contact_relation.trim() : null,
+        assigned_doctor_id || null
+      ]);
+
+      await conn.commit();
+
+      const [createdRows] = await conn.query('SELECT * FROM patients WHERE id = ?', [patientInsert.insertId]);
+      const created = createdRows[0];
+
+      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+      logAudit({
+        userId: req.user.id,
+        userEmail: req.user.email,
+        userRole: req.user.role,
+        action: 'CREATE',
+        resource: 'PATIENT',
+        resourceId: patientId,
+        details: `Created patient record for ${first_name} ${last_name} (${patientId}) with linked login account (${targetLoginEmail})`,
+        ipAddress: Array.isArray(ip) ? ip[0] : ip
+      }).catch(() => {});
+
+      return successResponse(res, {
+        ...created,
+        has_login: true,
+        login_email: targetLoginEmail,
+        temporary_password: temporaryPassword // Shown once to Admin, never logged or stored in plain text
+      }, 'Patient created and login account provisioned successfully', 201);
+    }
+
+    // Standard patient creation without login account
     const patientId = await generatePatientId();
 
     const [result] = await query(`
@@ -266,7 +400,7 @@ async function createPatient(req, res) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       patientId,
-      user_id || null,
+      linkedUserId,
       first_name.trim(),
       last_name.trim(),
       dob,
@@ -300,10 +434,183 @@ async function createPatient(req, res) {
       ipAddress: Array.isArray(ip) ? ip[0] : ip
     }).catch(() => {});
 
-    return successResponse(res, created, 'Patient created successfully', 201);
+    return successResponse(res, {
+      ...created,
+      has_login: false
+    }, 'Patient created successfully', 201);
   } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
     console.error('createPatient error:', err);
     return errorResponse(res, 'Failed to create patient: ' + err.message, 500);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+/**
+ * Admin creates a login account for an existing patient without a login
+ */
+async function createPatientLogin(req, res) {
+  let conn = null;
+  try {
+    const { id } = req.params;
+    const { email, password, generate_password } = req.body;
+
+    const [patRows] = await query('SELECT * FROM patients WHERE id = ? OR patient_id = ?', [id, id]);
+    const patient = patRows[0];
+    if (!patient) {
+      return errorResponse(res, 'Patient record not found.', 404);
+    }
+
+    if (patient.user_id) {
+      return errorResponse(res, 'This patient already has a linked login account.', 409);
+    }
+
+    const targetEmail = (email || patient.email || '').trim();
+    if (!isValidEmail(targetEmail)) {
+      return errorResponse(res, 'A valid email address is required to create a patient login.', 400);
+    }
+
+    const [existingUsers] = await query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
+      [targetEmail]
+    );
+    if (existingUsers.length > 0) {
+      return errorResponse(res, `A user account with email '${targetEmail}' already exists.`, 409);
+    }
+
+    let rawPassword = '';
+    let temporaryPassword = null;
+    if (generate_password || !password) {
+      rawPassword = generateSecurePassword();
+      temporaryPassword = rawPassword;
+    } else {
+      const pwdCheck = validatePassword(password);
+      if (!pwdCheck.valid) {
+        return errorResponse(res, pwdCheck.message, 400);
+      }
+      rawPassword = password;
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(rawPassword, salt);
+
+    conn = await getConnection();
+    await conn.beginTransaction();
+
+    const [userInsert] = await conn.query(`
+      INSERT INTO users (name, email, password_hash, role, phone)
+      VALUES (?, ?, ?, 'Patient', ?)
+    `, [
+      `${patient.first_name} ${patient.last_name}`,
+      targetEmail,
+      passwordHash,
+      patient.phone
+    ]);
+
+    const newUserId = userInsert.insertId;
+
+    await conn.query(`
+      UPDATE patients 
+      SET user_id = ?, email = COALESCE(NULLIF(email, ''), ?), updated_at = NOW() 
+      WHERE id = ?
+    `, [newUserId, targetEmail, patient.id]);
+
+    await conn.commit();
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    logAudit({
+      userId: req.user.id,
+      userEmail: req.user.email,
+      userRole: req.user.role,
+      action: 'CREATE',
+      resource: 'USER',
+      resourceId: String(newUserId),
+      details: `Created portal login for patient ${patient.patient_id} (${targetEmail})`,
+      ipAddress: Array.isArray(ip) ? ip[0] : ip
+    }).catch(() => {});
+
+    return successResponse(res, {
+      patient_id: patient.patient_id,
+      user_id: newUserId,
+      email: targetEmail,
+      temporary_password: temporaryPassword
+    }, 'Patient login account created successfully', 201);
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('createPatientLogin error:', err);
+    return errorResponse(res, 'Failed to create patient login: ' + err.message, 500);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+/**
+ * Admin resets password for a patient with an existing login
+ */
+async function resetPatientPassword(req, res) {
+  try {
+    const { id } = req.params;
+    const { new_password, generate_password } = req.body;
+
+    const [patRows] = await query('SELECT * FROM patients WHERE id = ? OR patient_id = ?', [id, id]);
+    const patient = patRows[0];
+    if (!patient) {
+      return errorResponse(res, 'Patient record not found.', 404);
+    }
+
+    if (!patient.user_id) {
+      return errorResponse(res, 'Patient does not have a linked login account to reset.', 400);
+    }
+
+    const [userRows] = await query('SELECT id, email, name FROM users WHERE id = ?', [patient.user_id]);
+    const user = userRows[0];
+    if (!user) {
+      return errorResponse(res, 'Linked user account was not found.', 404);
+    }
+
+    let rawPassword = '';
+    let temporaryPassword = null;
+    if (generate_password || !new_password) {
+      rawPassword = generateSecurePassword();
+      temporaryPassword = rawPassword;
+    } else {
+      const pwdCheck = validatePassword(new_password);
+      if (!pwdCheck.valid) {
+        return errorResponse(res, pwdCheck.message, 400);
+      }
+      rawPassword = new_password;
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(rawPassword, salt);
+
+    await query('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [passwordHash, user.id]);
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    logAudit({
+      userId: req.user.id,
+      userEmail: req.user.email,
+      userRole: req.user.role,
+      action: 'UPDATE',
+      resource: 'USER',
+      resourceId: String(user.id),
+      details: `Admin reset password for patient ${patient.patient_id} (${user.email})`,
+      ipAddress: Array.isArray(ip) ? ip[0] : ip
+    }).catch(() => {});
+
+    return successResponse(res, {
+      patient_id: patient.patient_id,
+      email: user.email,
+      temporary_password: temporaryPassword
+    }, 'Password reset successfully');
+  } catch (err) {
+    console.error('resetPatientPassword error:', err);
+    return errorResponse(res, 'Failed to reset password: ' + err.message, 500);
   }
 }
 
@@ -456,6 +763,8 @@ module.exports = {
   listPatients,
   getPatientById,
   createPatient,
+  createPatientLogin,
+  resetPatientPassword,
   updatePatient,
   deletePatient,
   restorePatient

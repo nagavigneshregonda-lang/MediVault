@@ -8,6 +8,8 @@ import { showToast } from '../components/toast.js';
 import { openModal, closeModal } from '../components/modal.js';
 import { formatDate, renderSkeletonTable, renderEmptyState, renderErrorState } from '../utils.js';
 
+let currentSubView = '';
+
 let testFilters = {
   status: '',
   category: '',
@@ -16,18 +18,33 @@ let testFilters = {
   limit: 15
 };
 
-export async function renderTestsView() {
+export async function renderTestsView(subView = '') {
   const user = Store.state.user;
+  const isQueue = subView === 'queue';
 
   return `
     <div class="content-wrapper">
-      <div class="page-header">
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
         <div class="page-title-group">
           <h1>
-            <i class="fa-solid fa-flask-vial" style="color:var(--primary); font-size:1.5rem;"></i>
-            <span>Diagnostic Laboratory Operations</span>
+            <i class="fa-solid ${isQueue ? 'fa-vial-circle-check' : 'fa-flask-vial'}" style="color:var(--primary); font-size:1.5rem;"></i>
+            <span>${isQueue ? 'Laboratory Processing Queue' : 'Diagnostic Lab Management'}</span>
           </h1>
-          <div class="page-subtitle">Centralized clinical specimen queue, quantitative analysis, and automated warning flags</div>
+          <div class="page-subtitle">
+            ${isQueue ? 'Active pending collection and in-progress specimens requiring clinical processing and result verification' : 'Centralized laboratory management &mdash; all orders, specimens, test statuses, and verified results'}
+          </div>
+        </div>
+
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+          ${isQueue ? `
+            <a href="#tests" class="btn btn-secondary">
+              <i class="fa-solid fa-flask-vial"></i> Open Lab Manager
+            </a>
+          ` : `
+            <a href="#tests/queue" class="btn btn-primary">
+              <i class="fa-solid fa-vial-circle-check"></i> Process Lab Queue
+            </a>
+          `}
         </div>
       </div>
 
@@ -120,7 +137,8 @@ export async function renderTestsView() {
           <div class="form-group">
             <label><i class="fa-solid fa-list-check"></i> Workflow Status</label>
             <select id="tests-status-select" class="form-control">
-              <option value="">All Statuses</option>
+              <option value="" ${!isQueue ? 'selected' : ''}>All Statuses</option>
+              <option value="queue" ${isQueue ? 'selected' : ''}>Queue: Ordered & In Progress</option>
               <option value="Ordered">Ordered (Pending)</option>
               <option value="In Progress">In Progress</option>
               <option value="Completed">Completed</option>
@@ -182,7 +200,17 @@ export async function renderTestsView() {
   `;
 }
 
-export function initTestsListeners() {
+export function initTestsListeners(subView = '') {
+  currentSubView = subView || '';
+  const isQueue = currentSubView === 'queue';
+  testFilters = {
+    status: isQueue ? 'queue' : '',
+    category: '',
+    search: '',
+    page: 1,
+    limit: 15
+  };
+
   loadAllTestsTable();
 
   const searchInput = document.getElementById('tests-search-input');
@@ -220,9 +248,9 @@ export function initTestsListeners() {
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
       if (searchInput) searchInput.value = '';
-      if (statusSelect) statusSelect.value = '';
+      if (statusSelect) statusSelect.value = isQueue ? 'queue' : '';
       if (catSelect) catSelect.value = '';
-      testFilters = { status: '', category: '', search: '', page: 1, limit: 15 };
+      testFilters = { status: isQueue ? 'queue' : '', category: '', search: '', page: 1, limit: 15 };
       loadAllTestsTable();
     });
   }
@@ -305,8 +333,8 @@ async function loadAllTestsTable() {
           <td><span class="badge ${getStatusBadgeClass(t.status)}">${t.status}</span></td>
           <td style="text-align:right; white-space:nowrap;">
             ${canProcess ? `
-              <button class="btn btn-primary btn-sm enter-results-btn" data-id="${t.id}" title="Enter Lab Results">
-                <i class="fa-solid fa-pen-to-square"></i> Results
+              <button class="btn ${currentSubView === 'queue' ? 'btn-primary' : 'btn-secondary'} btn-sm enter-results-btn" data-id="${t.id}" title="${currentSubView === 'queue' ? 'Process Specimen & Record Result' : 'Enter Lab Results'}">
+                <i class="fa-solid fa-pen-to-square"></i> ${currentSubView === 'queue' ? 'Process Test' : 'Results'}
               </button>
             ` : ''}
           </td>

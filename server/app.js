@@ -45,13 +45,24 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate Limiting for Auth
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // limit each IP to 50 login attempts per window
+// Rate Limiting Configuration
+const apiLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || 900000, 10), // 15 minutes default
+  max: parseInt(process.env.RATE_LIMIT_MAX || 1000, 10), // 1000 requests per 15 min per IP
   message: {
     success: false,
-    message: 'Too many authentication attempts. Please try again after 15 minutes.'
+    message: 'Too many requests. Please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15, // limit each IP to 15 login attempts per window
+  message: {
+    success: false,
+    message: 'Too many login attempts. Please try again after 15 minutes.'
   },
   standardHeaders: true,
   legacyHeaders: false
@@ -66,6 +77,7 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // API Routes
+app.use('/api', apiLimiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);

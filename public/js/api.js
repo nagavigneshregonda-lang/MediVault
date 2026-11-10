@@ -80,6 +80,14 @@ const api = {
     }
   },
 
+  async changePassword(currentPassword, newPassword) {
+    const res = await request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    });
+    return res.data;
+  },
+
   // Users
   async getUsers(role = '') {
     const query = role ? `?role=${encodeURIComponent(role)}` : '';
@@ -133,6 +141,22 @@ const api = {
   async restorePatient(id) {
     const res = await request(`/patients/${id}/restore`, {
       method: 'POST'
+    });
+    return res.data;
+  },
+
+  async createPatientLogin(patientId, data) {
+    const res = await request(`/patients/${patientId}/create-login`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    return res.data;
+  },
+
+  async resetPatientPassword(patientId, data) {
+    const res = await request(`/patients/${patientId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(data)
     });
     return res.data;
   },

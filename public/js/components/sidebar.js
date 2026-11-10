@@ -18,14 +18,15 @@ export function renderSidebar(activeRoute = 'dashboard') {
     .join('')
     .toUpperCase();
 
-  // Navigation Items by Role
+  // Strict role-based navigation items
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie', hash: '#dashboard', roles: ['Admin', 'Doctor', 'Patient', 'Lab Technician'] },
-    { id: 'patients', label: role === 'Patient' ? 'My Health Record' : 'Patients Directory', icon: 'fa-hospital-user', hash: role === 'Patient' ? (user.patientCode ? `#patient/${user.patientCode}` : '#dashboard') : '#patients', roles: ['Admin', 'Doctor', 'Patient'] },
+    { id: 'patients', label: role === 'Patient' ? 'My Medical Record' : 'Patients Directory', icon: 'fa-hospital-user', hash: role === 'Patient' ? (user.patientCode ? `#patient/${user.patientCode}` : '#dashboard') : '#patients', roles: ['Admin', 'Doctor', 'Patient'] },
     { id: 'tests', label: 'Diagnostic Lab', icon: 'fa-flask-vial', hash: '#tests', roles: ['Admin', 'Doctor', 'Lab Technician'] },
-    { id: 'access', label: 'Authorized Access', icon: 'fa-shield-halved', hash: '#access', roles: ['Patient', 'Doctor', 'Admin'] },
+    { id: 'access', label: 'Access Hub', icon: 'fa-shield-halved', hash: '#access', roles: ['Patient', 'Doctor', 'Admin'] },
     { id: 'audit', label: 'Audit Trail', icon: 'fa-clock-rotate-left', hash: '#audit', roles: ['Admin'] },
-    { id: 'users', label: 'User Management', icon: 'fa-users-gear', hash: '#users', roles: ['Admin'] }
+    { id: 'users', label: 'User Management', icon: 'fa-users-gear', hash: '#users', roles: ['Admin'] },
+    { id: 'landing', label: 'Home', icon: 'fa-house', hash: '#landing', roles: ['Admin', 'Doctor', 'Patient', 'Lab Technician'] }
   ];
 
   const visibleItems = navItems.filter(item => item.roles.includes(role));
@@ -43,19 +44,13 @@ export function renderSidebar(activeRoute = 'dashboard') {
       </div>
 
       <nav class="sidebar-nav">
-        <div class="nav-section-title">Clinical Navigation</div>
+        <div class="nav-section-title">Navigation</div>
         ${visibleItems.map(item => `
           <a href="${item.hash}" class="nav-item ${activeRoute === item.id ? 'active' : ''}">
             <i class="fa-solid ${item.icon}"></i>
             <span>${item.label}</span>
           </a>
         `).join('')}
-
-        <div class="nav-section-title" style="margin-top:1.5rem;">System & Help</div>
-        <a href="#landing" class="nav-item">
-          <i class="fa-solid fa-globe"></i>
-          <span>Public Portal</span>
-        </a>
       </nav>
 
       <div class="sidebar-footer">

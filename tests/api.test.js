@@ -514,6 +514,19 @@ describe('8. Diagnostic Tests Summary & Overdue Logic', () => {
     const overdueItem = res.body.data.tests.find(t => t.is_overdue === true);
     expect(overdueItem).toBeDefined();
   });
+
+  test('GET /api/tests?status=queue returns only Ordered and In Progress tests for lab queue', async () => {
+    const res = await request(app)
+      .get('/api/tests?status=queue')
+      .set('Authorization', `Bearer ${labToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.tests.length).toBeGreaterThan(0);
+    res.body.data.tests.forEach(test => {
+      expect(['Ordered', 'In Progress']).toContain(test.status);
+    });
+  });
 });
 
 describe('9. Access Grants Hub & Summary Statistics', () => {
@@ -542,6 +555,241 @@ describe('10. Patient Summary Counts Validation', () => {
     expect(res.body.data.summary.femaleCount).toBeGreaterThan(0);
     expect(res.body.data.summary.allergyWatchlist).toBeGreaterThan(0);
     expect(res.body.data.summary.chronicCount).toBeGreaterThan(0);
+  });
+});
+
+describe('11. Patient Account Provisioning, Role-Scoped Dashboards & Strict Access Enforcement', () => {
+  let newPatientEmail = `test.patient.${Date.now()}@medivault.com`;
+  let newPatientTemporaryPassword;
+  let newPatientId;
+  let newPatientCode;
+  let newPatientToken;
+
+  test('1. Admin creates a patient with login account in one transaction', async () => {
+    const res = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'Jessica',
+        last_name: 'Walsh',
+        dob: '1992-04-12',
+        gender: 'Female',
+        blood_group: 'B+',
+        phone: '+1 555-882-9911',
+        email: newPatientEmail,
+        create_login: true,
+        login_email: newPatientEmail,
+        generate_temporary: true
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.patient_id).toBeDefined();
+    expect(res.body.data.temporary_password).toBeDefined();
+    expect(res.body.data.password_hash).toBeUndefined(); // Never leak hash
+
+    newPatientId = res.body.data.id;
+    newPatientCode = res.body.data.patient_id;
+    newPatientTemporaryPassword = res.body.data.temporary_password;
+
+    // Verify linked account in DB
+    const [pRows] = await query('SELECT * FROM patients WHERE id = ?', [newPatientId]);
+    expect(pRows[0].user_id).not.toBeNull();
+
+    const [uRows] = await query('SELECT * FROM users WHERE id = ?', [pRows[0].user_id]);
+    expect(uRows[0].email).toBe(newPatientEmail.toLowerCase());
+    expect(uRows[0].role).toBe('Patient');
+  });
+
+  test('2. Duplicate email rejected with 409 Conflict', async () => {
+    const res = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'Clone',
+        last_name: 'Patient',
+        dob: '1990-01-01',
+        gender: 'Male',
+        blood_group: 'O+',
+        phone: '+1 555-111-2222',
+        create_login: true,
+        login_email: newPatientEmail, // Duplicate
+        generate_temporary: true
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('3. Double linking rejected with 409 Conflict', async () => {
+    const res = await request(app)
+      .post(`/api/patients/${newPatientId}/create-login`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        email: `another.${Date.now()}@medivault.com`,
+        generate_temporary: true
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('4. Non-Admin cannot create login account (403 Forbidden)', async () => {
+    // Create an unlinked patient first
+    const unlinkedRes = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'NoLogin',
+        last_name: 'Person',
+        dob: '1985-05-15',
+        gender: 'Male',
+        blood_group: 'A+',
+        phone: '+1 555-333-4444'
+      });
+    const unlinkedId = unlinkedRes.body.data.id;
+
+    // Doctor attempts to provision login -> 403
+    const docRes = await request(app)
+      .post(`/api/patients/${unlinkedId}/create-login`)
+      .set('Authorization', `Bearer ${doctorMarcusToken}`)
+      .send({ email: 'nologin@test.com', generate_temporary: true });
+    expect(docRes.status).toBe(403);
+
+    // Patient attempts to provision login -> 403
+    const patRes = await request(app)
+      .post(`/api/patients/${unlinkedId}/create-login`)
+      .set('Authorization', `Bearer ${patientToken}`)
+      .send({ email: 'nologin@test.com', generate_temporary: true });
+    expect(patRes.status).toBe(403);
+  });
+
+  test('5. New patient logs in with temporary password and accesses own record', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: newPatientEmail, password: newPatientTemporaryPassword });
+
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.success).toBe(true);
+    expect(loginRes.body.data.user.role).toBe('Patient');
+    expect(loginRes.body.data.user.patientCode).toBe(newPatientCode);
+
+    newPatientToken = loginRes.body.data.token;
+
+    // Access own record -> 200
+    const ownRecRes = await request(app)
+      .get(`/api/patients/${newPatientCode}`)
+      .set('Authorization', `Bearer ${newPatientToken}`);
+    expect(ownRecRes.status).toBe(200);
+    expect(ownRecRes.body.data.patient_id).toBe(newPatientCode);
+  });
+
+  test('6. Patient cannot open another patient\'s record (403 Forbidden)', async () => {
+    // New patient tries to access Eleanor Vance (MV-2026-0001)
+    const res = await request(app)
+      .get('/api/patients/MV-2026-0001')
+      .set('Authorization', `Bearer ${newPatientToken}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('7. Patient gets role-scoped dashboard without global counts or system health', async () => {
+    const res = await request(app)
+      .get('/api/stats/dashboard')
+      .set('Authorization', `Bearer ${newPatientToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe('Patient');
+    expect(res.body.data.counts.totalPatients).toBeUndefined();
+    expect(res.body.data.counts.totalDoctors).toBeUndefined();
+    expect(res.body.data.systemHealth).toBeNull();
+    expect(res.body.data.counts.activePrescriptions).toBeDefined();
+    expect(res.body.data.counts.authorizedDoctors).toBeDefined();
+  });
+
+  test('8. Doctor gets role-scoped dashboard without global counts or system health', async () => {
+    const res = await request(app)
+      .get('/api/stats/dashboard')
+      .set('Authorization', `Bearer ${doctorMarcusToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe('Doctor');
+    expect(res.body.data.counts.totalPatients).toBeUndefined();
+    expect(res.body.data.counts.totalDoctors).toBeUndefined();
+    expect(res.body.data.systemHealth).toBeNull();
+    expect(res.body.data.counts.myPatients).toBeDefined();
+    expect(res.body.data.counts.prescriptionsWritten).toBeDefined();
+  });
+
+  test('9. Lab Tech cannot access patient directory (403) and gets no audit data', async () => {
+    // Cannot access patients directory
+    const patListRes = await request(app)
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${labToken}`);
+    expect(patListRes.status).toBe(403);
+
+    // Cannot access audit logs
+    const auditRes = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${labToken}`);
+    expect(auditRes.status).toBe(403);
+
+    // Dashboard has no patient or audit data
+    const dashRes = await request(app)
+      .get('/api/stats/dashboard')
+      .set('Authorization', `Bearer ${labToken}`);
+    expect(dashRes.status).toBe(200);
+    expect(dashRes.body.data.role).toBe('Lab Technician');
+    expect(dashRes.body.data.counts.totalPatients).toBeUndefined();
+    expect(dashRes.body.data.systemHealth).toBeNull();
+    expect(dashRes.body.data.recentActivity).toEqual([]);
+  });
+
+  test('10. Only Admin can read audit logs', async () => {
+    const adminAuditRes = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(adminAuditRes.status).toBe(200);
+
+    const docAuditRes = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${doctorMarcusToken}`);
+    expect(docAuditRes.status).toBe(403);
+
+    const patAuditRes = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${patientToken}`);
+    expect(patAuditRes.status).toBe(403);
+  });
+
+  test('11. User can change their own password via /api/auth/change-password', async () => {
+    const newPassword = 'NewSecretPassword@999';
+
+    // 1. Change password with valid credentials
+    const changeRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${newPatientToken}`)
+      .send({
+        current_password: newPatientTemporaryPassword,
+        new_password: newPassword
+      });
+
+    expect(changeRes.status).toBe(200);
+    expect(changeRes.body.success).toBe(true);
+
+    // 2. Old password fails
+    const oldLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: newPatientEmail, password: newPatientTemporaryPassword });
+    expect(oldLoginRes.status).toBe(401);
+
+    // 3. New password succeeds
+    const newLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: newPatientEmail, password: newPassword });
+    expect(newLoginRes.status).toBe(200);
+    expect(newLoginRes.body.success).toBe(true);
   });
 });
 

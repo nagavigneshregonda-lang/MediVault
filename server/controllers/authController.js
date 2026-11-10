@@ -4,6 +4,7 @@ const { query } = require('../config/db');
 const { JWT_SECRET } = require('../middleware/auth');
 const { successResponse, errorResponse } = require('../utils/response');
 const { logAudit } = require('../middleware/auditLogger');
+const { validatePassword } = require('../utils/helpers');
 
 async function login(req, res) {
   try {
@@ -127,8 +128,59 @@ function logout(req, res) {
   return successResponse(res, null, 'Logged out successfully');
 }
 
+async function changePassword(req, res) {
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return errorResponse(res, 'Both current password and new password are required.', 400);
+    }
+
+    const passwordValidation = validatePassword(new_password);
+    if (!passwordValidation.valid) {
+      return errorResponse(res, passwordValidation.message, 400);
+    }
+
+    if (current_password === new_password) {
+      return errorResponse(res, 'New password must be different from current password.', 400);
+    }
+
+    const [rows] = await query('SELECT id, password_hash FROM users WHERE id = ?', [req.user.id]);
+    const user = rows[0];
+
+    if (!user) {
+      return errorResponse(res, 'User not found.', 404);
+    }
+
+    const isMatch = await bcrypt.compare(current_password, user.password_hash);
+    if (!isMatch) {
+      return errorResponse(res, 'Current password is incorrect.', 400);
+    }
+
+    const newHash = await bcrypt.hash(new_password, 10);
+    await query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, req.user.id]);
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    await logAudit({
+      userId: req.user.id,
+      userRole: req.user.role,
+      action: 'PASSWORD_CHANGE',
+      resource: 'USER',
+      resourceId: req.user.id,
+      details: 'User updated their account password',
+      ipAddress: Array.isArray(ip) ? ip[0] : ip
+    }).catch(() => {});
+
+    return successResponse(res, null, 'Password updated successfully.');
+  } catch (err) {
+    console.error('changePassword error:', err);
+    return errorResponse(res, 'Failed to update password.', 500);
+  }
+}
+
 module.exports = {
   login,
   getMe,
-  logout
+  logout,
+  changePassword
 };

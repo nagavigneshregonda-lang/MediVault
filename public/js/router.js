@@ -15,6 +15,8 @@ import { renderAccessView, initAccessListeners } from './views/accessView.js';
 import { renderAuditView, initAuditListeners } from './views/auditView.js';
 import { renderUsersView, initUsersListeners } from './views/usersView.js';
 import { showToast } from './components/toast.js';
+import { openModal, closeModal } from './components/modal.js';
+import api from './api.js';
 
 export async function handleRouteChange() {
   const root = document.getElementById('app-root');
@@ -55,6 +57,22 @@ export async function handleRouteChange() {
   const baseRoute = routeParts[0];
   const routeParam = routeParts[1];
 
+  const user = Store.state.user;
+
+  // Patient Route Guard: isolate patient strictly to their own records and dashboard
+  if (user && user.role === 'Patient') {
+    if (['patients', 'tests', 'audit', 'users'].includes(baseRoute)) {
+      showToast('Access restricted: Patient accounts cannot access clinical administration consoles.', 'warning');
+      window.location.hash = '#dashboard';
+      return;
+    }
+    if (baseRoute === 'patient' && routeParam && user.patientCode && routeParam.toUpperCase() !== user.patientCode.toUpperCase()) {
+      showToast('Access restricted: You cannot view records for another patient.', 'error');
+      window.location.hash = '#dashboard';
+      return;
+    }
+  }
+
   let mainContentHtml = '';
   let initFn = null;
 
@@ -80,8 +98,8 @@ export async function handleRouteChange() {
       break;
 
     case 'tests':
-      mainContentHtml = await renderTestsView();
-      initFn = initTestsListeners;
+      mainContentHtml = await renderTestsView(routeParam);
+      initFn = () => initTestsListeners(routeParam);
       break;
 
     case 'access':
@@ -172,6 +190,12 @@ function setupShellEventListeners() {
     topbarLogout.addEventListener('click', () => Store.logout());
   }
 
+  // Change Password
+  const changePwBtn = document.getElementById('topbar-change-password-btn');
+  if (changePwBtn) {
+    changePwBtn.addEventListener('click', () => openChangePasswordModal());
+  }
+
   const sidebarLogout = document.getElementById('sidebar-logout-btn');
   if (sidebarLogout) {
     sidebarLogout.addEventListener('click', () => Store.logout());
@@ -253,4 +277,78 @@ function setupShellEventListeners() {
       if (notifDropdown) notifDropdown.classList.remove('open');
     });
   }
+}
+
+function openChangePasswordModal() {
+  const bodyHtml = `
+    <form id="change-password-form">
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Current Password *</label>
+        <input type="password" id="cp-current" class="form-control" placeholder="Enter current password" required autocomplete="current-password">
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>New Password *</label>
+        <input type="password" id="cp-new" class="form-control" placeholder="At least 8 characters (letter + number)" required autocomplete="new-password">
+        <small style="color:var(--text-muted); font-size:0.75rem;">Must be at least 8 characters long and contain both a letter and a number.</small>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Confirm New Password *</label>
+        <input type="password" id="cp-confirm" class="form-control" placeholder="Re-enter new password" required autocomplete="new-password">
+      </div>
+    </form>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
+    <button class="btn btn-primary modal-save-btn">
+      <i class="fa-solid fa-key"></i> Update Password
+    </button>
+  `;
+
+  openModal({
+    title: 'Update Account Password',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '480px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const saveBtn = modalEl.querySelector('.modal-save-btn');
+  modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+  saveBtn.addEventListener('click', async () => {
+    const currentPassword = modalEl.querySelector('#cp-current').value;
+    const newPassword = modalEl.querySelector('#cp-new').value;
+    const confirmPassword = modalEl.querySelector('#cp-confirm').value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      showToast('All fields are required.', 'warning');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      showToast('New password and confirm password do not match.', 'warning');
+      return;
+    }
+
+    if (newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      showToast('Password must be at least 8 characters long and contain at least one letter and one number.', 'warning');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
+
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      showToast('Password updated successfully!', 'success');
+      closeModal();
+    } catch (err) {
+      showToast(err.message || 'Failed to update password.', 'error');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-key"></i> Update Password';
+    }
+  });
 }

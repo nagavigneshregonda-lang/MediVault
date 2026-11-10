@@ -22,7 +22,7 @@ export function renderLoginView() {
 
         <div style="max-width: 520px; margin: 3rem 0;">
           <div class="badge" style="background:rgba(255,255,255,0.15); color:white; margin-bottom:1.25rem;">
-            <i class="fa-solid fa-lock"></i> HIPAA & GDPR Aligned Architecture
+            <i class="fa-solid fa-lock"></i> HIPAA-inspired security practices
           </div>
           <h2 style="font-size: 2.5rem; line-height: 1.25; margin-bottom: 1.25rem; color: #ffffff;">
             Secure Electronic Health Records at Scale
@@ -164,11 +164,8 @@ export function initLoginListeners() {
         Store.setUser(data.user, data.token);
         showToast(`Welcome back, ${data.user.name}!`, 'success');
 
-        if (data.user.role === 'Patient' && data.user.patientCode) {
-          window.location.hash = `#patient/${data.user.patientCode}`;
-        } else {
-          window.location.hash = '#dashboard';
-        }
+        // Redirect to dashboard (adaptive dashboard renders role-specific Patient Dashboard for patients)
+        window.location.hash = '#dashboard';
       } catch (err) {
         showToast(err.message || 'Login failed. Please check credentials.', 'error');
         submitBtn.disabled = false;

@@ -148,10 +148,58 @@ function autoFlagTestResult(valueStr, referenceRange) {
   return 'Normal';
 }
 
+const crypto = require('crypto');
+
+function isValidEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email.trim());
+}
+
+function validatePassword(password) {
+  if (!password || typeof password !== 'string') {
+    return { valid: false, message: 'Password is required.' };
+  }
+  if (password.length < 8) {
+    return { valid: false, message: 'Password must be at least 8 characters long.' };
+  }
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one letter and one number.' };
+  }
+  return { valid: true };
+}
+
+function generateSecurePassword() {
+  const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijkmnpqrstuvwxyz';
+  const numbers = '23456789';
+  const symbols = '!@#$%^&*';
+
+  let pwd = '';
+  const pick = (chars, count) => {
+    let r = '';
+    for (let i = 0; i < count; i++) {
+      r += chars[crypto.randomInt(0, chars.length)];
+    }
+    return r;
+  };
+
+  pwd += pick(uppercase, 3);
+  pwd += pick(lowercase, 4);
+  pwd += pick(numbers, 3);
+  pwd += pick(symbols, 2);
+
+  // Shuffle
+  return pwd.split('').sort(() => crypto.randomInt(-1, 2)).join('');
+}
+
 module.exports = {
   generatePatientId,
   calculateAge,
   calculateBmi,
   checkDrugAllergyConflict,
-  autoFlagTestResult
+  autoFlagTestResult,
+  isValidEmail,
+  validatePassword,
+  generateSecurePassword
 };

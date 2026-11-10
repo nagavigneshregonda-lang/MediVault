@@ -96,7 +96,7 @@ export async function renderAuditView() {
               <div class="stat-value" id="stat-chart-views">--</div>
               <div class="stat-label">Chart Access Invocations</div>
               <div class="stat-badge-row">
-                <span class="stat-trend positive"><i class="fa-solid fa-hospital-user"></i> HIPAA Audited</span>
+                <span class="stat-trend positive"><i class="fa-solid fa-hospital-user"></i> HIPAA-inspired logging</span>
               </div>
             </div>
           </div>

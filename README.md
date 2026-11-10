@@ -10,6 +10,7 @@
    - Standardized alphanumeric patient IDs (`MV-2026-0001` through `MV-2026-0058`).
    - Automated age calculation from DOB and live BMI computation with clinical categories.
    - Demographics, emergency contact mapping, and duplicate prevention by phone/email.
+   - **Patient Portal Account Provisioning**: Each patient record links to a login account via a nullable `UNIQUE patients.user_id` foreign key. Administrators can provision logins during initial registration or for existing patients in an atomic MySQL transaction with temporary password generation.
    - Soft-delete (archival) with `is_deleted = 1` and instant administrative restoration.
    - Summary statistics cards on directory (Total patients, gender split, allergy watchlist, chronic conditions).
 
@@ -63,7 +64,7 @@
 - **Frontend**: Modern HTML5, CSS3 Variables, Glassmorphism UI, Vanilla JavaScript (ES Modules), Hash Router SPA
 - **Visualizations**: Chart.js for clinical metric trends and 12-month registration graphs
 - **Security**: Helmet security headers, CORS, express-rate-limit, parameterized SQL queries (`?`)
-- **Testing**: Jest + Supertest (31/31 automated integration tests passing against isolated `medivault_test` database)
+- **Testing**: Jest + Supertest (42/42 automated integration tests passing against isolated `medivault_test` database)
 
 ---
 

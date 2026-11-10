@@ -352,8 +352,8 @@ async function loadPatientsTable() {
           </td>
           <td class="col-demographics">
             <div style="font-weight:500; white-space:nowrap;">${p.age !== null ? p.age + ' yrs' : 'N/A'} &bull; ${p.gender}</div>
-            <div style="font-size:0.75rem; color:var(--text-muted); white-space:nowrap;">
-              ${p.bmi ? `BMI ${p.bmi} (${p.bmiCategory})` : 'BMI not recorded'}
+            <div style="font-size:0.75rem; color:var(--text-muted); white-space:nowrap; margin-top:2px;">
+              ${p.has_login ? `<span class="badge badge-normal" style="font-size:0.72rem; padding:2px 6px;" title="${p.login_email || ''}"><i class="fa-solid fa-circle-check"></i> Login Active</span>` : `<span class="badge badge-info" style="font-size:0.72rem; padding:2px 6px;"><i class="fa-solid fa-circle-minus"></i> No Login</span>`}
             </div>
           </td>
           <td class="col-blood">
@@ -376,6 +376,11 @@ async function loadPatientsTable() {
               <a href="#patient/${p.patient_id}" class="btn btn-secondary btn-sm" title="Open Patient Chart">
                 <i class="fa-regular fa-folder-open"></i> Chart
               </a>
+              ${isAdmin && !isArchived && !p.has_login ? `
+                <button class="btn btn-primary btn-sm create-patient-login-btn" data-id="${p.id}" data-pid="${p.patient_id}" data-name="${cleanName}" data-email="${p.email || ''}" title="Create Patient Portal Account">
+                  <i class="fa-solid fa-key"></i>
+                </button>
+              ` : ''}
               ${isAdmin && isArchived ? `
                 <button class="btn btn-success btn-sm restore-patient-btn" data-id="${p.patient_id}" title="Restore Patient">
                   <i class="fa-solid fa-trash-can-arrow-up"></i>
@@ -424,6 +429,18 @@ async function loadPatientsTable() {
         } catch (err) {
           showToast(err.message, 'error');
         }
+      });
+    });
+
+    tbody.querySelectorAll('.create-patient-login-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const patientData = {
+          id: btn.getAttribute('data-id'),
+          patient_id: btn.getAttribute('data-pid'),
+          name: btn.getAttribute('data-name'),
+          email: btn.getAttribute('data-email')
+        };
+        openCreatePatientLoginModal(patientData);
       });
     });
   } catch (err) {
@@ -534,8 +551,17 @@ function openRegisterPatientModal() {
           <input type="tel" id="reg-phone" class="form-control" placeholder="+1 (555) 000-0000" required>
         </div>
         <div class="form-group">
-          <label>Email Address</label>
-          <input type="email" id="reg-email" class="form-control" placeholder="patient@example.com">
+          <label>Email Address *</label>
+          <input type="email" id="reg-email" class="form-control" placeholder="patient@example.com" required>
+        </div>
+      </div>
+
+      <!-- Automatic Patient Portal Account Banner -->
+      <div style="background:var(--primary-light); border:1px solid rgba(14,165,233,0.25); padding:0.85rem 1rem; border-radius:var(--radius-md); margin-bottom:1.25rem; display:flex; align-items:flex-start; gap:0.75rem;">
+        <i class="fa-solid fa-shield-halved" style="color:var(--primary); font-size:1.1rem; margin-top:2px;"></i>
+        <div style="font-size:0.85rem; line-height:1.45; color:var(--text-main);">
+          <strong>Automatic Patient Portal Provisioning</strong><br>
+          A secure login account with an auto-generated temporary password will be automatically provisioned for this patient using this email address. Credentials will be presented for one-time copying upon registration.
         </div>
       </div>
 
@@ -669,11 +695,16 @@ function openRegisterPatientModal() {
       return;
     }
 
+    if (!email) {
+      showToast('Please provide an Email Address to provision patient portal credentials.', 'warning');
+      return;
+    }
+
     saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registering...';
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registering & Provisioning...';
 
     try {
-      const created = await api.createPatient({
+      const payload = {
         first_name: fname,
         last_name: lname,
         dob,
@@ -689,11 +720,21 @@ function openRegisterPatientModal() {
         emergency_contact_name: emName,
         emergency_contact_phone: emPhone,
         emergency_contact_relation: emRel,
-        assigned_doctor_id: docId ? parseInt(docId, 10) : null
-      });
+        assigned_doctor_id: docId ? parseInt(docId, 10) : null,
+        create_login: true,
+        login_email: email,
+        generate_temporary: true
+      };
 
-      showToast(`Patient registered! Assigned ID: ${created.patient_id}`, 'success');
+      const created = await api.createPatient(payload);
       closeModal();
+
+      if (created.temporary_password) {
+        openTemporaryPasswordModal(email, created.temporary_password, `${fname} ${lname}`);
+      } else {
+        showToast(`Patient registered! Assigned ID: ${created.patient_id}`, 'success');
+      }
+
       loadPatientsTable();
     } catch (err) {
       showToast(err.message, 'error');
@@ -701,4 +742,178 @@ function openRegisterPatientModal() {
       saveBtn.innerHTML = '<i class="fa-solid fa-check"></i> Register Patient Record';
     }
   });
+}
+
+function openCreatePatientLoginModal(patient) {
+  const bodyHtml = `
+    <form id="create-patient-login-form">
+      <div style="margin-bottom:1rem; padding:0.75rem 1rem; background:var(--primary-light); border-radius:var(--radius-md);">
+        <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${patient.name} &bull; ${patient.patient_id}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Provision a new Patient Portal user account linked to this record</div>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Portal Login Email *</label>
+        <input type="email" id="prov-email" class="form-control" value="${patient.email || ''}" placeholder="patient@example.com" required>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.85rem; margin-bottom:1rem;">
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="prov-pw-type" value="temp" checked>
+          <span>Auto-generate secure temporary password (recommended)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="radio" name="prov-pw-type" value="custom">
+          <span>Set custom password</span>
+        </label>
+        <div id="prov-custom-pw-box" style="display:none; margin-top:0.35rem;">
+          <input type="password" id="prov-custom-pw" class="form-control" placeholder="At least 8 characters (letters + numbers)" autocomplete="new-password">
+          <small style="color:var(--text-muted); font-size:0.75rem;">Minimum 8 characters with at least one letter and one number.</small>
+        </div>
+      </div>
+    </form>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
+    <button class="btn btn-primary modal-save-btn">
+      <i class="fa-solid fa-key"></i> Create Account
+    </button>
+  `;
+
+  openModal({
+    title: 'Provision Patient Portal Login',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '500px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const customPwBox = modalEl.querySelector('#prov-custom-pw-box');
+  modalEl.querySelectorAll('input[name="prov-pw-type"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (customPwBox) customPwBox.style.display = r.value === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  const saveBtn = modalEl.querySelector('.modal-save-btn');
+  modalEl.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+  saveBtn.addEventListener('click', async () => {
+    const email = modalEl.querySelector('#prov-email').value.trim();
+    const pwType = modalEl.querySelector('input[name="prov-pw-type"]:checked')?.value || 'temp';
+    const customPw = modalEl.querySelector('#prov-custom-pw')?.value || '';
+
+    if (!email) {
+      showToast('Login email is required.', 'warning');
+      return;
+    }
+
+    if (pwType === 'custom') {
+      if (!customPw || customPw.length < 8 || !/[A-Za-z]/.test(customPw) || !/[0-9]/.test(customPw)) {
+        showToast('Password must be at least 8 characters long and contain letters and numbers.', 'warning');
+        return;
+      }
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Provisioning...';
+
+    try {
+      const payload = {
+        email,
+        generate_temporary: pwType === 'temp'
+      };
+      if (pwType === 'custom') {
+        payload.password = customPw;
+      }
+
+      const res = await api.createPatientLogin(patient.id, payload);
+      closeModal();
+
+      if (res.temporary_password) {
+        openTemporaryPasswordModal(email, res.temporary_password, patient.name);
+      } else {
+        showToast(`Login created successfully for ${patient.name}!`, 'success');
+      }
+
+      loadPatientsTable();
+    } catch (err) {
+      showToast(err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-key"></i> Create Account';
+    }
+  });
+}
+
+export function openTemporaryPasswordModal(email, tempPassword, patientName) {
+  const bodyHtml = `
+    <div style="text-align:center; padding:1.25rem 0;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--emerald-light); color:var(--emerald); display:flex; align-items:center; justify-content:center; font-size:1.8rem; margin:0 auto 1rem;">
+        <i class="fa-solid fa-shield-check"></i>
+      </div>
+      <h3 style="margin-bottom:0.5rem; font-size:1.25rem;">Patient Login Account Active</h3>
+      <p style="color:var(--text-muted); font-size:0.88rem; max-width:440px; margin:0 auto 1.25rem; line-height:1.5;">
+        Secure login credentials have been provisioned for <strong>${patientName}</strong>. 
+        Please copy and provide this temporary password to the patient now. For security, it will <strong>not be displayed again</strong>.
+      </p>
+
+      <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem 1.25rem; max-width:420px; margin:0 auto 1.25rem; text-align:left;">
+        <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Login Email</div>
+        <div style="font-weight:700; color:var(--text-main); margin-bottom:0.75rem; font-size:0.95rem;" id="temp-email-text">${email}</div>
+        
+        <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Temporary Password</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; margin-top:2px;">
+          <code style="font-size:1.2rem; font-weight:800; color:var(--primary); font-family:monospace; letter-spacing:0.06em;" id="temp-pw-text">${tempPassword}</code>
+          <button class="btn btn-primary btn-sm" id="copy-credentials-btn" title="Copy email and temporary password">
+            <i class="fa-regular fa-copy"></i> Copy Credentials
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const footerHtml = `
+    <button class="btn btn-secondary modal-save-btn" style="width:100%;">
+      <i class="fa-solid fa-check"></i> Done &mdash; I have recorded these credentials
+    </button>
+  `;
+
+  openModal({
+    title: 'One-Time Patient Credentials',
+    bodyHtml,
+    footerHtml,
+    maxWidth: '520px'
+  });
+
+  const modalEl = document.getElementById('app-active-modal');
+  if (!modalEl) return;
+
+  const copyBtn = modalEl.querySelector('#copy-credentials-btn') || modalEl.querySelector('#copy-temp-pw-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const credentialsText = `Email: ${email}\nPassword: ${tempPassword}`;
+      navigator.clipboard.writeText(credentialsText).then(() => {
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        showToast('Credentials copied to clipboard!', 'info');
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Credentials';
+        }, 2000);
+      }).catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = credentialsText;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        showToast('Credentials copied to clipboard!', 'info');
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Credentials';
+        }, 2000);
+      });
+    });
+  }
+
+  modalEl.querySelector('.modal-save-btn').addEventListener('click', closeModal);
 }

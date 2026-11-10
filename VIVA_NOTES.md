@@ -174,7 +174,16 @@ Incoming Request for Patient Chart
 **Answer**: No. Access control is strictly enforced on the server in Express middleware before any database query is executed. Hiding buttons in the UI is only for user experience; the backend is the authoritative security boundary.
 
 ### Q10: What is an Audit Trail and why is it mandatory in healthcare?
-**Answer**: An audit trail is an append-only log recording who accessed or modified patient data, at what time, from what IP address, and what action was taken. It is required for legal and regulatory compliance (such as HIPAA).
+**Answer**: An audit trail is an append-only log recording who accessed or modified patient data, at what time, from what IP address, and what action was taken. It is required for accountability and HIPAA-inspired security practices.
+
+### Q11: How does patient account linking and portal login work?
+**Answer**: Each patient record has a nullable `UNIQUE user_id` foreign key referencing `users.id`. When an administrator registers a patient with a login account (or provisions one for an existing patient), the patient record and user record (role 'Patient') are created in ONE atomic database transaction (`conn.beginTransaction()`, `commit()`, `rollback()`). If an auto-generated temporary password is used, it is shown once to the administrator and never logged in plaintext.
+
+### Q12: How are dashboards role-scoped for privacy?
+**Answer**: `GET /api/stats/dashboard` returns strictly role-scoped telemetry. Admin sees facility-wide counts, full audit trails, and system health. Doctor sees only their assigned patients and active consent counts, their own prescriptions, and their ordered tests. Lab Technician sees the specimen worklist and test flag distributions with zero patient demographic data or audit data. Patient sees only their active prescriptions, completed test results, and authorized care team, with zero facility-wide counts.
+
+### Q13: How is rate limiting implemented?
+**Answer**: General API requests (`/api`) are rate limited to 1,000 requests per 15-minute window per IP (configurable via `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX`). Sensitive authentication endpoints (`/api/auth/login`) are capped at 15 attempts per 15-minute window with a friendly lockout notification to prevent brute-force credential stuffing.
 
 ---
 
@@ -285,7 +294,7 @@ Incoming Request for Patient Chart
 - **Resolution**: It selects the transaction that has modified the smallest number of rows as the "victim" and rolls it back with error `1213 (ER_LOCK_DEADLOCK)`, allowing the other transaction to proceed.
 
 ### Q19: Why use the Soft Delete pattern instead of physical `DELETE`?
-**Answer**: In healthcare applications, deleting medical data violates compliance (HIPAA, GDPR) and destroys legal audit trails. MediVault sets `is_deleted = 1` and updates `updated_at = NOW()`.
+**Answer**: In healthcare applications, deleting medical data violates compliance and destroys legal audit trails. Following HIPAA-inspired security practices, MediVault sets `is_deleted = 1` and updates `updated_at = NOW()`.
 - Active queries filter `WHERE is_deleted = 0`.
 - Historical relationships and audit logs remain intact.
 - An Administrator can instantly restore mistakenly deactivated profiles via `UPDATE patients SET is_deleted = 0`.

@@ -84,6 +84,14 @@ export function renderNavbar() {
           <span>${user ? user.role : 'Guest'}</span>
         </div>
 
+        ${user ? `
+          <!-- Change Password -->
+          <button id="topbar-change-password-btn" class="btn btn-secondary btn-sm" title="Change Password">
+            <i class="fa-solid fa-key"></i>
+            <span>Password</span>
+          </button>
+        ` : ''}
+
         <!-- User Logout -->
         <button id="topbar-logout-btn" class="btn btn-secondary btn-sm" title="Log out">
           <i class="fa-solid fa-arrow-right-from-bracket"></i>
