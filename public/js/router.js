@@ -61,15 +61,34 @@ export async function handleRouteChange() {
 
   // Patient Route Guard: isolate patient strictly to their own records and dashboard
   if (user && user.role === 'Patient') {
-    if (['patients', 'tests', 'audit', 'users'].includes(baseRoute)) {
+    if (['tests', 'audit', 'users'].includes(baseRoute)) {
       showToast('Access restricted: Patient accounts cannot access clinical administration consoles.', 'warning');
       window.location.hash = '#dashboard';
       return;
     }
-    if (baseRoute === 'patient' && routeParam && user.patientCode && routeParam.toUpperCase() !== user.patientCode.toUpperCase()) {
-      showToast('Access restricted: You cannot view records for another patient.', 'error');
-      window.location.hash = '#dashboard';
+
+    if (baseRoute === 'patients') {
+      window.location.hash = '#my-record';
       return;
+    }
+
+    if (baseRoute === 'patient' && routeParam) {
+      let ownCode = (user.patientCode || user.patient_code || '').toUpperCase();
+      if (!ownCode) {
+        try {
+          const fresh = await api.getMe();
+          if (fresh && (fresh.patientCode || fresh.patient_code)) {
+            ownCode = (fresh.patientCode || fresh.patient_code).toUpperCase();
+            Store.setUser(fresh, Store.state.token);
+          }
+        } catch (_) {}
+      }
+
+      if (!ownCode || routeParam.toUpperCase() !== ownCode) {
+        showToast('Access restricted: You cannot view records for another patient.', 'error');
+        window.location.hash = ownCode ? `#patient/${ownCode}` : '#my-record';
+        return;
+      }
     }
   }
 
@@ -82,6 +101,48 @@ export async function handleRouteChange() {
       initFn = initDashboardListeners;
       break;
 
+    case 'my-record':
+      if (user && user.role === 'Patient') {
+        let pCode = user.patientCode || user.patient_code;
+        if (!pCode) {
+          try {
+            const fresh = await api.getMe();
+            if (fresh && (fresh.patientCode || fresh.patient_code)) {
+              pCode = fresh.patientCode || fresh.patient_code;
+              Store.setUser(fresh, Store.state.token);
+            }
+          } catch (_) {}
+        }
+
+        if (pCode) {
+          window.location.hash = `#patient/${pCode}`;
+          return;
+        } else {
+          mainContentHtml = `
+            <div class="content-wrapper">
+              <div class="glass-card" style="padding:4rem 2rem; text-align:center; max-width:620px; margin:3rem auto;">
+                <div style="font-size:3.5rem; color:var(--amber); margin-bottom:1rem;">
+                  <i class="fa-solid fa-hospital-user"></i>
+                </div>
+                <h2 style="font-size:1.6rem; margin-bottom:0.75rem;">No Linked Medical Record Found</h2>
+                <p style="color:var(--text-muted); font-size:1rem; line-height:1.6; margin-bottom:1.75rem;">
+                  Your patient login account (<strong>${user.email || 'User'}</strong>) is not currently associated with a clinical profile in the system. 
+                  Please contact the hospital administrator or your attending clinic to link your patient record.
+                </p>
+                <a href="#dashboard" class="btn btn-primary">
+                  <i class="fa-solid fa-house"></i> Return to Dashboard
+                </a>
+              </div>
+            </div>
+          `;
+          showToast('No clinical record is linked to your account yet.', 'warning');
+          break;
+        }
+      } else {
+        window.location.hash = '#dashboard';
+        return;
+      }
+
     case 'patients':
       mainContentHtml = await renderPatientsView();
       initFn = initPatientsListeners;
@@ -91,6 +152,9 @@ export async function handleRouteChange() {
       if (routeParam) {
         mainContentHtml = await renderPatientDetailView(routeParam);
         initFn = () => initPatientDetailListeners(routeParam);
+      } else if (user && user.role === 'Patient') {
+        window.location.hash = '#my-record';
+        return;
       } else {
         window.location.hash = '#patients';
         return;

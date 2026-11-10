@@ -38,7 +38,7 @@ export function renderLandingView() {
       <section class="landing-hero">
         <div style="max-width: 850px; margin: 0 auto; z-index: 2;">
           <div class="badge badge-normal" style="padding: 0.45rem 1rem; font-size: 0.85rem; margin-bottom: 1.5rem; border: 1px solid rgba(16, 185, 129, 0.3);">
-            <i class="fa-solid fa-shield-check"></i> Next-Gen Enterprise Healthcare Record System
+            <i class="fa-solid fa-shield-halved"></i> Next-Gen Enterprise Healthcare Record System
           </div>
           <h1 style="font-size: 3.2rem; line-height: 1.2; font-weight: 800; margin-bottom: 1.25rem;">
             Unified Clinical Records. <br>

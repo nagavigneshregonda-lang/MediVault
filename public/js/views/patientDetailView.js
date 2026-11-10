@@ -396,7 +396,7 @@ async function loadHistoryTimeline() {
     const canModify = user.role === 'Admin' || user.role === 'Doctor';
 
     if (!history || history.length === 0) {
-      timelineEl.innerHTML = renderEmptyState('No medical history records catalogued yet.', 'New diagnoses or clinical visits added will build the longitudinal timeline.');
+      timelineEl.innerHTML = renderEmptyState('fa-clock-rotate-left', 'No medical history records catalogued yet.', 'New diagnoses or clinical visits added will build the longitudinal timeline.');
       return;
     }
 
@@ -651,7 +651,7 @@ async function loadPrescriptionsTable() {
       tbody.innerHTML = `
         <tr>
           <td colspan="7">
-            ${renderEmptyState('No prescriptions recorded', 'There are no medications currently on file for this patient.')}
+            ${renderEmptyState('fa-prescription-bottle-medical', 'No prescriptions recorded', 'There are no medications currently on file for this patient.')}
           </td>
         </tr>
       `;
@@ -1037,7 +1037,7 @@ async function loadTestsTable() {
       tbody.innerHTML = `
         <tr>
           <td colspan="7">
-            ${renderEmptyState('No laboratory tests on record', 'Order a diagnostic test to initiate specimen processing.')}
+            ${renderEmptyState('fa-vial', 'No laboratory tests on record', 'Order a diagnostic test to initiate specimen processing.')}
           </td>
         </tr>
       `;
@@ -1309,7 +1309,7 @@ function openUpdateTestModal(test) {
    ============================================================================== */
 async function renderAccessTab(container) {
   const user = Store.state.user;
-  const isSelfPatient = user.role === 'Patient' && user.patientCode === activePatient.patient_id;
+  const isSelfPatient = user.role === 'Patient' && (user.patientCode === activePatient.patient_id || user.patient_code === activePatient.patient_id || user.id === activePatient.user_id);
   const isAdmin = user.role === 'Admin';
   const canGrant = isSelfPatient || isAdmin;
 
@@ -1366,13 +1366,13 @@ async function loadAccessGrantsTable() {
   try {
     const grants = await api.getPatientGrants(activePatient.patient_id);
     const user = Store.state.user;
-    const canRevoke = user.role === 'Admin' || (user.role === 'Patient' && user.patientCode === activePatient.patient_id);
+    const canRevoke = user.role === 'Admin' || (user.role === 'Patient' && (user.patientCode === activePatient.patient_id || user.patient_code === activePatient.patient_id || user.id === activePatient.user_id));
 
     if (!grants || grants.length === 0) {
       tbody.innerHTML = `
         <tr>
           <td colspan="7">
-            ${renderEmptyState('No secondary doctor authorizations active', `Only the primary assigned physician (${activePatient.doctor ? activePatient.doctor.name : 'None'}) has chart access.`)}
+            ${renderEmptyState('fa-user-shield', 'No secondary doctor authorizations active', `Only the primary assigned physician (${activePatient.doctor ? activePatient.doctor.name : 'None'}) has chart access.`)}
           </td>
         </tr>
       `;
@@ -1464,7 +1464,7 @@ function openGrantAccessModal() {
     bodyHtml,
     footerHtml: `
       <button class="btn btn-secondary modal-cancel-btn">Cancel</button>
-      <button class="btn btn-primary modal-save-btn"><i class="fa-solid fa-shield-check"></i> Authorize Doctor</button>
+      <button class="btn btn-primary modal-save-btn"><i class="fa-solid fa-user-shield"></i> Authorize Doctor</button>
     `,
     maxWidth: '580px'
   });
@@ -1501,7 +1501,7 @@ function openGrantAccessModal() {
     } catch (err) {
       showToast(err.message, 'error');
       saveBtn.disabled = false;
-      saveBtn.innerHTML = '<i class="fa-solid fa-shield-check"></i> Authorize Doctor';
+      saveBtn.innerHTML = '<i class="fa-solid fa-user-shield"></i> Authorize Doctor';
     }
   });
 }
@@ -1704,7 +1704,7 @@ function showTemporaryPasswordDisplay(email, tempPassword, patientName) {
   const bodyHtml = `
     <div style="text-align:center; padding:1.25rem 0;">
       <div style="width:56px; height:56px; border-radius:50%; background:var(--emerald-light); color:var(--emerald); display:flex; align-items:center; justify-content:center; font-size:1.8rem; margin:0 auto 1rem;">
-        <i class="fa-solid fa-shield-check"></i>
+        <i class="fa-solid fa-circle-check"></i>
       </div>
       <h3 style="margin-bottom:0.5rem; font-size:1.25rem;">Temporary Credentials Generated</h3>
       <p style="color:var(--text-muted); font-size:0.88rem; max-width:440px; margin:0 auto 1.25rem; line-height:1.5;">

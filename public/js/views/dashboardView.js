@@ -38,8 +38,8 @@ export async function renderDashboardView() {
               <i class="fa-solid fa-vial-circle-check"></i> Process Lab Queue
             </a>
           ` : ''}
-          ${user.role === 'Patient' && user.patientCode ? `
-            <a href="#patient/${user.patientCode}" class="btn btn-primary">
+          ${user.role === 'Patient' ? `
+            <a href="${user.patientCode ? `#patient/${user.patientCode}` : '#my-record'}" class="btn btn-primary" id="dash-my-record-btn">
               <i class="fa-solid fa-file-medical"></i> View My Full Record
             </a>
           ` : ''}
@@ -476,7 +476,24 @@ function renderRoleSpecificBody(data, role) {
             </a>
           </div>
         </div>
-      ` : ''}
+      ` : `
+        <div class="glass-card" style="padding:1.5rem; margin-bottom:2rem; border-left:4px solid var(--amber);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+            <div>
+              <div style="font-weight:700; font-size:1.05rem; color:var(--text-main);">
+                <i class="fa-solid fa-circle-exclamation" style="color:var(--amber); margin-right:6px;"></i>
+                Medical Profile Pending Assignment
+              </div>
+              <div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">
+                Your account is active, but a clinical chart has not been linked to your login yet.
+              </div>
+            </div>
+            <a href="#my-record" class="btn btn-secondary btn-sm">
+              <i class="fa-solid fa-circle-info"></i> Record Status
+            </a>
+          </div>
+        </div>
+      `}
 
       <!-- Authorized Doctors & Consent Status -->
       <div class="glass-card" style="padding:1.75rem; margin-bottom:2rem;">
@@ -544,7 +561,7 @@ function renderRoleSpecificBody(data, role) {
         const grantId = e.currentTarget.dataset.id;
         if (!confirm('Are you sure you want to revoke this physician\'s access to your medical record?')) return;
         try {
-          await api.revokeAccess(grantId);
+          await api.revokeAccess({ grant_id: grantId });
           showToast('Doctor access revoked successfully.', 'success');
           initDashboardListeners();
         } catch (err) {

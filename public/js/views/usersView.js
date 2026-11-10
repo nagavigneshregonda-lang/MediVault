@@ -134,7 +134,7 @@ async function loadUsersTable() {
     const users = await api.getUsers();
 
     if (!users || users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6">${renderEmptyState('No user accounts found', 'Provision a new doctor, technician, or administrator account.')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6">${renderEmptyState('fa-users-gear', 'No user accounts found', 'Provision a new doctor, technician, or administrator account.')}</td></tr>`;
       return;
     }
 

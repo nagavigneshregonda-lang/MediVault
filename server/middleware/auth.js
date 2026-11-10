@@ -24,10 +24,13 @@ async function authenticate(req, res, next) {
     // Verify token
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Query active user
+    // Query active user and dynamically resolve linked patient record if role is Patient
     const [rows] = await query(`
-      SELECT id, name, email, role, phone, specialization, license_number
-      FROM users WHERE id = ?
+      SELECT u.id, u.name, u.email, u.role, u.phone, u.specialization, u.license_number,
+             p.id AS patient_numeric_id, p.id AS patientId, p.patient_id AS patientCode, p.patient_id AS patient_code
+      FROM users u
+      LEFT JOIN patients p ON p.user_id = u.id AND p.is_deleted = 0
+      WHERE u.id = ?
     `, [decoded.id]);
 
     const user = rows[0];

@@ -32,7 +32,7 @@ async function login(req, res) {
     // Find linked patient id if role is Patient
     let linkedPatient = null;
     if (user.role === 'Patient') {
-      const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ?', [user.id]);
+      const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ? AND is_deleted = 0 LIMIT 1', [user.id]);
       linkedPatient = patientRows[0] || null;
     }
 
@@ -67,6 +67,9 @@ async function login(req, res) {
       ipAddress: Array.isArray(ip) ? ip[0] : ip
     }).catch(() => {});
 
+    const patientId = linkedPatient ? linkedPatient.id : null;
+    const patientCode = linkedPatient ? linkedPatient.patient_id : null;
+
     return successResponse(res, {
       token,
       user: {
@@ -77,8 +80,10 @@ async function login(req, res) {
         phone: user.phone,
         specialization: user.specialization,
         licenseNumber: user.license_number,
-        patientId: linkedPatient ? linkedPatient.id : null,
-        patientCode: linkedPatient ? linkedPatient.patient_id : null
+        patientId,
+        patientCode,
+        patient_id: patientId,
+        patient_code: patientCode
       }
     }, 'Login successful');
   } catch (err) {
@@ -91,14 +96,19 @@ async function getMe(req, res) {
   try {
     let linkedPatient = null;
     if (req.user.role === 'Patient') {
-      const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ?', [req.user.id]);
+      const [patientRows] = await query('SELECT id, patient_id FROM patients WHERE user_id = ? AND is_deleted = 0 LIMIT 1', [req.user.id]);
       linkedPatient = patientRows[0] || null;
     }
 
+    const patientId = linkedPatient ? linkedPatient.id : (req.user.patientId || null);
+    const patientCode = linkedPatient ? linkedPatient.patient_id : (req.user.patientCode || null);
+
     return successResponse(res, {
       ...req.user,
-      patientId: linkedPatient ? linkedPatient.id : null,
-      patientCode: linkedPatient ? linkedPatient.patient_id : null
+      patientId,
+      patientCode,
+      patient_id: patientId,
+      patient_code: patientCode
     }, 'Current user fetched');
   } catch (err) {
     return errorResponse(res, 'Failed to retrieve profile.', 500);

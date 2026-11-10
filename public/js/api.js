@@ -277,10 +277,18 @@ const api = {
     return res.data;
   },
 
-  async revokeAccess(patientId, doctorId, grantId = null) {
+  async revokeAccess(patientIdOrOptions, doctorId = null, grantId = null) {
+    let payload = {};
+    if (typeof patientIdOrOptions === 'object' && patientIdOrOptions !== null) {
+      payload = patientIdOrOptions;
+    } else if (patientIdOrOptions && !doctorId && !grantId) {
+      payload = { grant_id: patientIdOrOptions };
+    } else {
+      payload = { patient_id: patientIdOrOptions, doctor_id: doctorId, grant_id: grantId };
+    }
     const res = await request('/access/revoke', {
       method: 'POST',
-      body: JSON.stringify({ patient_id: patientId, doctor_id: doctorId, grant_id: grantId })
+      body: JSON.stringify(payload)
     });
     return res.data;
   },

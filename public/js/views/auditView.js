@@ -308,7 +308,7 @@ async function loadAuditLogs() {
       tbody.innerHTML = `
         <tr>
           <td colspan="8">
-            ${renderEmptyState('No audit events match current query', 'Try adjusting your search criteria, role filters, or date range.')}
+            ${renderEmptyState('fa-shield-halved', 'No audit events match current query', 'Try adjusting your search criteria, role filters, or date range.')}
           </td>
         </tr>
       `;

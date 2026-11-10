@@ -84,15 +84,47 @@ export function renderSkeletonTable(rows = 5, cols = 6) {
 
 /**
  * Render clean empty state
+ * Supports both signatures:
+ * - renderEmptyState(iconClass, title, message, actionHtml)
+ * - renderEmptyState(title, message, actionHtml)
  */
-export function renderEmptyState(iconClass, title, message, actionHtml = '') {
+export function renderEmptyState(arg1, arg2, arg3, arg4) {
+  let iconClass = 'fa-folder-open';
+  let title = '';
+  let message = '';
+  let actionHtml = '';
+
+  if (typeof arg3 === 'string' || typeof arg4 === 'string') {
+    iconClass = (arg1 && typeof arg1 === 'string' && arg1.startsWith('fa-')) ? arg1 : (arg1 || 'fa-folder-open');
+    title = arg2 || '';
+    message = arg3 || '';
+    actionHtml = arg4 || '';
+  } else {
+    if (typeof arg1 === 'string' && arg1.startsWith('fa-')) {
+      iconClass = arg1;
+      title = arg2 || '';
+      message = '';
+      actionHtml = '';
+    } else {
+      title = arg1 || '';
+      message = arg2 || '';
+      actionHtml = typeof arg3 === 'string' ? arg3 : '';
+    }
+  }
+
+  // Never allow literal "undefined" or "null" to be rendered
+  if (!iconClass || iconClass === 'undefined' || iconClass === 'null') iconClass = 'fa-folder-open';
+  if (!title || title === 'undefined' || title === 'null') title = '';
+  if (!message || message === 'undefined' || message === 'null') message = '';
+  if (!actionHtml || actionHtml === 'undefined' || actionHtml === 'null') actionHtml = '';
+
   return `
     <div class="empty-state">
       <div class="empty-state-icon">
         <i class="fa-solid ${iconClass}"></i>
       </div>
-      <h3>${title}</h3>
-      <p>${message}</p>
+      ${title ? `<h3>${title}</h3>` : ''}
+      ${message ? `<p>${message}</p>` : ''}
       ${actionHtml}
     </div>
   `;

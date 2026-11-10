@@ -850,7 +850,7 @@ export function openTemporaryPasswordModal(email, tempPassword, patientName) {
   const bodyHtml = `
     <div style="text-align:center; padding:1.25rem 0;">
       <div style="width:56px; height:56px; border-radius:50%; background:var(--emerald-light); color:var(--emerald); display:flex; align-items:center; justify-content:center; font-size:1.8rem; margin:0 auto 1rem;">
-        <i class="fa-solid fa-shield-check"></i>
+        <i class="fa-solid fa-circle-check"></i>
       </div>
       <h3 style="margin-bottom:0.5rem; font-size:1.25rem;">Patient Login Account Active</h3>
       <p style="color:var(--text-muted); font-size:0.88rem; max-width:440px; margin:0 auto 1.25rem; line-height:1.5;">

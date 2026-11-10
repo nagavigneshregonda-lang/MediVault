@@ -21,7 +21,7 @@ export function renderSidebar(activeRoute = 'dashboard') {
   // Strict role-based navigation items
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie', hash: '#dashboard', roles: ['Admin', 'Doctor', 'Patient', 'Lab Technician'] },
-    { id: 'patients', label: role === 'Patient' ? 'My Medical Record' : 'Patients Directory', icon: 'fa-hospital-user', hash: role === 'Patient' ? (user.patientCode ? `#patient/${user.patientCode}` : '#dashboard') : '#patients', roles: ['Admin', 'Doctor', 'Patient'] },
+    { id: 'patients', label: role === 'Patient' ? 'My Medical Record' : 'Patients Directory', icon: 'fa-hospital-user', hash: role === 'Patient' ? (user.patientCode ? `#patient/${user.patientCode}` : '#my-record') : '#patients', roles: ['Admin', 'Doctor', 'Patient'] },
     { id: 'tests', label: 'Diagnostic Lab', icon: 'fa-flask-vial', hash: '#tests', roles: ['Admin', 'Doctor', 'Lab Technician'] },
     { id: 'access', label: 'Access Hub', icon: 'fa-shield-halved', hash: '#access', roles: ['Patient', 'Doctor', 'Admin'] },
     { id: 'audit', label: 'Audit Trail', icon: 'fa-clock-rotate-left', hash: '#audit', roles: ['Admin'] },
@@ -45,12 +45,16 @@ export function renderSidebar(activeRoute = 'dashboard') {
 
       <nav class="sidebar-nav">
         <div class="nav-section-title">Navigation</div>
-        ${visibleItems.map(item => `
-          <a href="${item.hash}" class="nav-item ${activeRoute === item.id ? 'active' : ''}">
-            <i class="fa-solid ${item.icon}"></i>
-            <span>${item.label}</span>
-          </a>
-        `).join('')}
+        ${visibleItems.map(item => {
+          const isActive = activeRoute === item.id || 
+            (role === 'Patient' && item.id === 'patients' && (activeRoute === 'patient' || activeRoute === 'my-record'));
+          return `
+            <a href="${item.hash}" class="nav-item ${isActive ? 'active' : ''}">
+              <i class="fa-solid ${item.icon}"></i>
+              <span>${item.label}</span>
+            </a>
+          `;
+        }).join('')}
       </nav>
 
       <div class="sidebar-footer">

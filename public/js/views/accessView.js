@@ -40,7 +40,7 @@ export async function renderAccessView() {
         <div class="glass-card stat-card">
           <div class="stat-left">
             <div class="stat-icon" style="background:var(--emerald-light); color:var(--emerald);">
-              <i class="fa-solid fa-shield-check"></i>
+              <i class="fa-solid fa-user-shield"></i>
             </div>
             <div class="stat-info">
               <div class="stat-value" id="stat-active-consents">--</div>
@@ -192,7 +192,7 @@ async function loadHubGrants() {
       tbody.innerHTML = `
         <tr>
           <td colspan="${colSpan}">
-            ${renderEmptyState('No secondary doctor authorizations on record', 'Patients can grant temporary or indefinite access to specialist physicians.')}
+            ${renderEmptyState('fa-user-shield', 'No secondary doctor authorizations on record', 'Patients can grant temporary or indefinite access to specialist physicians.')}
           </td>
         </tr>
       `;

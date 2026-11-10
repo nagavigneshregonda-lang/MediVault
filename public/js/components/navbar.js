@@ -67,7 +67,7 @@ export function renderNavbar() {
               </div>
               <div class="notif-item">
                 <div style="width:28px; height:28px; border-radius:50%; background:var(--emerald-light); color:var(--emerald); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:0.8rem;">
-                  <i class="fa-solid fa-shield-check"></i>
+                  <i class="fa-solid fa-user-shield"></i>
                 </div>
                 <div style="font-size:0.82rem;">
                   <div style="font-weight:600; color:var(--text-main);">Access Authorization Active</div>

@@ -673,8 +673,18 @@ describe('11. Patient Account Provisioning, Role-Scoped Dashboards & Strict Acce
     expect(loginRes.body.success).toBe(true);
     expect(loginRes.body.data.user.role).toBe('Patient');
     expect(loginRes.body.data.user.patientCode).toBe(newPatientCode);
+    expect(loginRes.body.data.user.patientId).toBeDefined();
 
     newPatientToken = loginRes.body.data.token;
+
+    // Verify /api/auth/me returns the linked patient record id and code
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${newPatientToken}`);
+
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.patientCode).toBe(newPatientCode);
+    expect(meRes.body.data.patientId).toBe(newPatientId);
 
     // Access own record -> 200
     const ownRecRes = await request(app)
@@ -682,6 +692,85 @@ describe('11. Patient Account Provisioning, Role-Scoped Dashboards & Strict Acce
       .set('Authorization', `Bearer ${newPatientToken}`);
     expect(ownRecRes.status).toBe(200);
     expect(ownRecRes.body.data.patient_id).toBe(newPatientCode);
+  });
+
+  test('5b. Seeded demo patient retrieves their record id from /api/auth/me and opens own record', async () => {
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${patientToken}`);
+
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.role).toBe('Patient');
+    expect(meRes.body.data.patientCode).toBe('MV-2026-0001');
+    expect(meRes.body.data.patientId).toBeDefined();
+
+    // Opens own record
+    const ownRecRes = await request(app)
+      .get('/api/patients/MV-2026-0001')
+      .set('Authorization', `Bearer ${patientToken}`);
+    expect(ownRecRes.status).toBe(200);
+    expect(ownRecRes.body.data.first_name).toBe('Eleanor');
+
+    // Attempting another record -> 403
+    const forbiddenRes = await request(app)
+      .get('/api/patients/MV-2026-0002')
+      .set('Authorization', `Bearer ${patientToken}`);
+    expect(forbiddenRes.status).toBe(403);
+  });
+
+  test('5c. User linked to patient dynamically receives patientCode on /api/auth/me and opens own record', async () => {
+    // 1. Create an unlinked patient first
+    const createPatRes = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'LateLink',
+        last_name: 'User',
+        dob: '1995-08-20',
+        gender: 'Male',
+        blood_group: 'AB+',
+        phone: '+1 555-909-8877'
+      });
+    expect(createPatRes.status).toBe(201);
+    const latePatientId = createPatRes.body.data.id;
+    const latePatientCode = createPatRes.body.data.patient_id;
+
+    // 2. Admin provisions login for this patient
+    const lateEmail = `latelink.${Date.now()}@example.com`;
+    const provRes = await request(app)
+      .post(`/api/patients/${latePatientId}/create-login`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: lateEmail, generate_temporary: true });
+    expect(provRes.status).toBe(201);
+    const tempPw = provRes.body.data.temporary_password;
+
+    // 3. User logs in
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: lateEmail, password: tempPw });
+    expect(loginRes.status).toBe(200);
+    const token = loginRes.body.data.token;
+
+    // 4. /api/auth/me returns the linked patient id and code
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.data.patientCode).toBe(latePatientCode);
+    expect(meRes.body.data.patientId).toBe(latePatientId);
+
+    // 5. Opens own record -> 200
+    const ownRecRes = await request(app)
+      .get(`/api/patients/${latePatientCode}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(ownRecRes.status).toBe(200);
+    expect(ownRecRes.body.data.patient_id).toBe(latePatientCode);
+
+    // 6. Accessing another record -> 403
+    const forbiddenRes = await request(app)
+      .get('/api/patients/MV-2026-0001')
+      .set('Authorization', `Bearer ${token}`);
+    expect(forbiddenRes.status).toBe(403);
   });
 
   test('6. Patient cannot open another patient\'s record (403 Forbidden)', async () => {
