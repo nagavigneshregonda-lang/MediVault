@@ -4,7 +4,7 @@ const { query, getConnection } = require('../config/db');
 const { JWT_SECRET } = require('../middleware/auth');
 const { successResponse, errorResponse } = require('../utils/response');
 const { logAudit } = require('../middleware/auditLogger');
-const { validatePassword, isValidEmail } = require('../utils/helpers');
+const { validatePassword, isValidEmail, normalizeDateToYMD } = require('../utils/helpers');
 
 /**
  * Auto-link a Patient-role user to their matching patient record if exactly one unlinked record matches by email.
@@ -215,6 +215,8 @@ async function activatePatientAccount(req, res) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanPatientId = patient_id.trim().toUpperCase();
+
     if (!isValidEmail(cleanEmail)) {
       return errorResponse(res, 'Please provide a valid email address.', 400);
     }
@@ -224,10 +226,12 @@ async function activatePatientAccount(req, res) {
       return errorResponse(res, pwdCheck.message, 400);
     }
 
-    // Look up patient by patient_id code or numeric id
+    // Look up patient by patient_id code or numeric id, with DATE_FORMAT directly from MySQL
     const [patientRows] = await query(
-      'SELECT * FROM patients WHERE (patient_id = ? OR id = ?) AND is_deleted = 0',
-      [patient_id.trim(), patient_id.trim()]
+      `SELECT p.*, DATE_FORMAT(p.dob, '%Y-%m-%d') AS db_dob_str 
+       FROM patients p 
+       WHERE (UPPER(p.patient_id) = ? OR p.id = ?) AND p.is_deleted = 0`,
+      [cleanPatientId, cleanPatientId]
     );
     const patient = patientRows[0];
 
@@ -245,15 +249,9 @@ async function activatePatientAccount(req, res) {
       return errorResponse(res, genericError, 400);
     }
 
-    // Date of birth check (normalize to YYYY-MM-DD)
-    let patDobStr = '';
-    let inputDobStr = '';
-    try {
-      patDobStr = new Date(patient.dob).toISOString().split('T')[0];
-      inputDobStr = new Date(dob).toISOString().split('T')[0];
-    } catch (_) {
-      return errorResponse(res, genericError, 400);
-    }
+    // Date of birth check (robust normalization to YYYY-MM-DD, immune to timezone shifts)
+    const patDobStr = patient.db_dob_str || normalizeDateToYMD(patient.dob);
+    const inputDobStr = normalizeDateToYMD(dob);
 
     if (!patDobStr || !inputDobStr || patDobStr !== inputDobStr) {
       return errorResponse(res, genericError, 400);

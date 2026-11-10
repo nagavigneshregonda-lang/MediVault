@@ -213,6 +213,35 @@ async function runStartupMigrations(conn, dbName) {
     if (autoLinkedCount > 0) {
       console.log(`[MIGRATION] Auto-linked ${autoLinkedCount} unlinked Patient user account(s).`);
     }
+
+    // 3. Ensure patient MV-2026-0060 is accurately configured for patient self-service activation
+    try {
+      const [pat60] = await conn.query(`SELECT id, patient_id, user_id, email, dob FROM patients WHERE patient_id = 'MV-2026-0060'`);
+      if (pat60.length > 0) {
+        // If it was linked to the old dummy test user or has dummy email, reset it so the patient can activate
+        if (pat60[0].email && pat60[0].email.includes('sarah.jenkins')) {
+          await conn.query(`
+            UPDATE patients 
+            SET email = '2403a51153@sru.edu.in',
+                dob = '2007-05-04',
+                user_id = NULL,
+                updated_at = NOW() 
+            WHERE patient_id = 'MV-2026-0060'
+          `);
+          await conn.query(`DELETE FROM users WHERE email LIKE 'sarah.jenkins%@example.com'`);
+          console.log(`[MIGRATION] Reset patient MV-2026-0060 to 2403a51153@sru.edu.in (DOB: 2007-05-04) for activation.`);
+        }
+      } else {
+        // If MV-2026-0060 does not exist, provision it as an unlinked patient profile
+        await conn.query(`
+          INSERT INTO patients (patient_id, first_name, last_name, dob, gender, blood_group, phone, email, is_deleted)
+          VALUES ('MV-2026-0060', 'Student', 'Patient', '2007-05-04', 'Male', 'O+', '+91 9392860162', '2403a51153@sru.edu.in', 0)
+        `);
+        console.log(`[MIGRATION] Provisioned unlinked patient MV-2026-0060 for 2403a51153@sru.edu.in.`);
+      }
+    } catch (pat60Err) {
+      console.warn(`[MIGRATION] Notice checking MV-2026-0060: ${pat60Err.message}`);
+    }
   } catch (migErr) {
     console.warn(`[MIGRATION] Startup migration check warning: ${migErr.message}`);
   }

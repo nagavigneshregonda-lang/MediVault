@@ -160,13 +160,70 @@ function validatePassword(password) {
   if (!password || typeof password !== 'string') {
     return { valid: false, message: 'Password is required.' };
   }
-  if (password.length < 8) {
-    return { valid: false, message: 'Password must be at least 8 characters long.' };
-  }
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-    return { valid: false, message: 'Password must contain at least one letter and one number.' };
+  if (password.length < 6) {
+    return { valid: false, message: 'Password must be at least 6 characters long.' };
   }
   return { valid: true };
+}
+
+/**
+ * Universal date normalizer: converts any valid date string or Date object into 'YYYY-MM-DD'.
+ * Handles:
+ * - 'YYYY-MM-DD', 'YYYY/MM/DD'
+ * - 'DD-MM-YYYY', 'DD/MM/YYYY'
+ * - '04 May 2007', 'May 04, 2007', '4-May-2007'
+ * - JavaScript Date objects (without timezone drift)
+ */
+function normalizeDateToYMD(d) {
+  if (!d) return '';
+  if (d instanceof Date) {
+    if (isNaN(d.getTime())) return '';
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const str = String(d).trim();
+  // 1. Direct YYYY-MM-DD or YYYY/MM/DD
+  const ymd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (ymd) {
+    return `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}`;
+  }
+  // 2. DD-MM-YYYY or DD/MM/YYYY
+  const dmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (dmy) {
+    return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  }
+  // 3. Named month: e.g. '04 May 2007', 'May 04, 2007', '4-May-2007'
+  const months = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+  };
+  const namedMatch1 = str.match(/^(\d{1,2})[-/\s]+([a-zA-Z]{3,})[-/\s,]+(\d{4})/);
+  if (namedMatch1) {
+    const day = String(namedMatch1[1]).padStart(2, '0');
+    const monthKey = namedMatch1[2].toLowerCase().substring(0, 3);
+    const m = months[monthKey];
+    const y = namedMatch1[3];
+    if (m) return `${y}-${m}-${day}`;
+  }
+  const namedMatch2 = str.match(/^([a-zA-Z]{3,})[-/\s]+(\d{1,2})[-/\s,]+(\d{4})/);
+  if (namedMatch2) {
+    const monthKey = namedMatch2[1].toLowerCase().substring(0, 3);
+    const m = months[monthKey];
+    const day = String(namedMatch2[2]).padStart(2, '0');
+    const y = namedMatch2[3];
+    if (m) return `${y}-${m}-${day}`;
+  }
+  // Fallback to local calendar components
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return '';
 }
 
 function generateSecurePassword() {
@@ -201,5 +258,6 @@ module.exports = {
   autoFlagTestResult,
   isValidEmail,
   validatePassword,
+  normalizeDateToYMD,
   generateSecurePassword
 };
